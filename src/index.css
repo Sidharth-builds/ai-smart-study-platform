@@ -1,0 +1,23 @@
+@import "tailwindcss";
+
+/* Light mode overrides */
+.light {
+  --bg-primary: #ffffff;
+  --bg-secondary: #f8fafc;
+  --bg-tertiary: #f1f5f9;
+  --text-primary: #0f172a;
+  --text-secondary: #64748b;
+  --text-muted: #94a3b8;
+  --border: #e2e8f0;
+  --accent: #3b82f6;
+}
+
+/* Apply light mode styles */
+html.light {
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+}
+
+html.light body {
+  background-color: var(--bg-primary);
+}
