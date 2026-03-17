@@ -77,11 +77,6 @@ It helps students:
 
 ## 🚀 Deployment
 
-This project can be deployed using:
-
-- Vercel (Frontend)
-## 🚀 Deployment
-
 This project will be deployed using:
 
 - Vercel 
