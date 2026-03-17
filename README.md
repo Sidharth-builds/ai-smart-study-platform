@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="https://capsule-render.vercel.app/api?type=waving&color=6C63FF&height=200&section=header&text=AI%20Smart%20Study%20Platform&fontSize=35&fontColor=ffffff"/>
+</p>
+
 # 🚀 AI Smart Study Platform  
 
 <p align="center">
@@ -6,7 +10,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/React-Vite-blue?style=for-the-badge&logo=react" />
-  <img src="https://img.shields.io/badge/Firebase-Backend-orange?style=for-the-badge&logo=firebase" />
+  <img src="https://img.shields.io/badge/Firebase-BaaS-orange?style=for-the-badge&logo=firebase" />
   <img src="https://img.shields.io/badge/AI-Gemini-purple?style=for-the-badge&logo=google" />
   <img src="https://img.shields.io/badge/Status-Active-success?style=for-the-badge" />
 </p>
@@ -25,6 +29,15 @@ It helps students:
 - 🤖 Predict exam questions  
 
 ---
+
+## 👥 Contributors
+
+| Name | Role |
+|------|------|
+| **Sidharth** | Backend & Database (Firebase) |
+| **Keerthana** | Frontend + UI/UX |
+| **Sankeerthana** | PPT & Documentation |
+| **Prudhvi** | Testing & QA |
 
 ## ✨ Features
 
@@ -60,3 +73,15 @@ It helps students:
 | Tools | Git, GitHub |
 
 ---
+
+
+## 🚀 Deployment
+
+This project can be deployed using:
+
+- Vercel (Frontend)
+## 🚀 Deployment
+
+This project will be deployed using:
+
+- Vercel 
