@@ -60,12 +60,3 @@ It helps students:
 | Tools | Git, GitHub |
 
 ---
-
-## 📸 Screenshots
-
-> *(Add your screenshots here for maximum impact)*
-
-```md
-![Dashboard](./screenshots/dashboard.png)
-![Flashcards](./screenshots/flashcards.png)
-![Profile](./screenshots/profile.png)
