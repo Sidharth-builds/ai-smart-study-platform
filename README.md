@@ -1,20 +1,71 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
-</div>
+# 🚀 AI Smart Study Platform  
 
-# Run and deploy your AI Studio app
+<p align="center">
+  An AI-powered web platform to help students study smarter, faster, and more efficiently.
+</p>
 
-This contains everything you need to run your app locally.
+<p align="center">
+  <img src="https://img.shields.io/badge/React-Vite-blue?style=for-the-badge&logo=react" />
+  <img src="https://img.shields.io/badge/Firebase-Backend-orange?style=for-the-badge&logo=firebase" />
+  <img src="https://img.shields.io/badge/AI-Gemini-purple?style=for-the-badge&logo=google" />
+  <img src="https://img.shields.io/badge/Status-Active-success?style=for-the-badge" />
+</p>
 
-View your app in AI Studio: https://ai.studio/apps/b9fa9c23-6a83-4045-b3cf-98e23cbecf20
+---
 
-## Run Locally
+## 📌 Overview
 
-**Prerequisites:**  Node.js
+The **AI Smart Study Platform** is a modern web application that enhances student learning using AI-driven tools and real-time analytics.
 
+It helps students:
+- 📚 Organize study materials  
+- 🧠 Generate AI summaries  
+- 🃏 Create flashcards  
+- 📊 Track progress  
+- 🤖 Predict exam questions  
 
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+---
+
+## ✨ Features
+
+### 🔐 Authentication
+- Email & Password login  
+- Google Sign-In (OAuth)  
+
+### 📊 Dashboard
+- Study hours tracking  
+- Flashcards mastered  
+- Exam readiness indicators  
+
+### 🤖 AI Tools
+- AI Summarizer (text input)  
+- Flashcard Generator  
+- Predicted Questions  
+- Past Paper Analysis  
+
+### 🎨 UI/UX
+- Responsive design  
+- Light / Dark / System theme  
+- Clean modern interface  
+
+---
+
+## 🛠 Tech Stack
+
+| Category | Technology |
+|--------|-----------|
+| Frontend | React (Vite), Tailwind CSS |
+| Backend | Firebase Authentication, Firestore |
+| AI | Google Gemini API |
+| Tools | Git, GitHub |
+
+---
+
+## 📸 Screenshots
+
+> *(Add your screenshots here for maximum impact)*
+
+```md
+![Dashboard](./screenshots/dashboard.png)
+![Flashcards](./screenshots/flashcards.png)
+![Profile](./screenshots/profile.png)
