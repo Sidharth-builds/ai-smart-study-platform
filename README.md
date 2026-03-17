@@ -34,10 +34,10 @@ It helps students:
 
 | Name | Role |
 |------|------|
-| **Sidharth** | Backend & Database (Firebase) |
+| **Sidharth** | Backend & Database |
 | **Keerthana** | Frontend + UI/UX |
 | **Sankeerthana** | PPT & Documentation |
-| **Prudhvi** | Testing & QA |
+| **Prudhvi** | Testing |
 
 ## ✨ Features
 
@@ -58,7 +58,7 @@ It helps students:
 
 ### 🎨 UI/UX
 - Responsive design  
-- Light / Dark / System theme  
+- Dark theme  
 - Clean modern interface  
 
 ---
