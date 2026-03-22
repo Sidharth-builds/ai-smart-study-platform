@@ -1,9 +1,9 @@
 import { GoogleGenAI, Type } from "@google/genai";
 
 const getAI = () => {
-  const apiKey = process.env.GEMINI_API_KEY;
+  const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
   if (!apiKey) {
-    throw new Error("GEMINI_API_KEY is not set in environment variables.");
+    throw new Error("VITE_GEMINI_API_KEY is not set in environment variables.");
   }
   return new GoogleGenAI({ apiKey });
 };
@@ -24,7 +24,7 @@ export const generateStudyContent = async (text: string): Promise<{ summary: str
   try {
     const ai = getAI();
     const response = await ai.models.generateContent({
-      model: "gemini-3-flash-preview",
+      model: "gemini-1.5-flash",
       contents: `Analyze the following study material and provide:
       1. A concise summary.
       2. A list of key bullet points.
@@ -56,7 +56,7 @@ export const generateFlashcards = async (text: string): Promise<{ front: string;
   try {
     const ai = getAI();
     const response = await ai.models.generateContent({
-      model: "gemini-3-flash-preview",
+      model: "gemini-1.5-flash",
       contents: `Generate 5-10 effective study flashcards from the following text. Each flashcard should have a 'front' (question/term) and a 'back' (answer/definition).
       
       Text: ${text}`,
@@ -87,7 +87,7 @@ export const analyzePreviousPaper = async (text: string): Promise<{ questions: s
   try {
     const ai = getAI();
     const response = await ai.models.generateContent({
-      model: "gemini-3-flash-preview",
+      model: "gemini-1.5-flash",
       contents: `Analyze this previous year exam paper. 
       1. Extract the main questions.
       2. Categorize them by topic and estimate their frequency/importance.
@@ -129,7 +129,7 @@ export const summarizeYouTubeVideo = async (videoUrl: string): Promise<{ summary
   try {
     const ai = getAI();
     const response = await ai.models.generateContent({
-      model: "gemini-3-flash-preview",
+      model: "gemini-1.5-flash",
       contents: `Analyze the educational content from this YouTube video: ${videoUrl}. 
       Provide:
       1. A high-level summary.
@@ -174,7 +174,7 @@ export const predictExamQuestions = async (subject: string, topics: any[]): Prom
     const ai = getAI();
     const topicsList = topics.map(t => `${t.name} (Importance Score: ${t.score})`).join(', ');
     const response = await ai.models.generateContent({
-      model: "gemini-3-flash-preview",
+      model: "gemini-1.5-flash",
       contents: `As an expert examiner for the subject "${subject}", analyze these prioritized topics: ${topicsList}. 
       Predict the most likely exam questions. For each question, provide a probability of appearance (0-100) and a brief reasoning based on the topic's importance.`,
       config: {

@@ -29,6 +29,7 @@ export default function AISummarizer() {
       setResult(data);
     } catch (error) {
       console.error(error);
+      alert(`Failed to generate summary: ${error.message || 'Please try again.'}`);
     } finally {
       setLoading(false);
     }

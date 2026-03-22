@@ -54,8 +54,12 @@ export default function StudyRooms() {
     }
   };
 
-  const handleDeleteRoom = async (roomId: string, e: React.MouseEvent) => {
+  const handleDeleteRoom = async (roomId: string, roomCreatedBy: string, e: React.MouseEvent) => {
     e.stopPropagation(); // Prevent navigating to room
+    if (!user || user.uid !== roomCreatedBy) {
+      alert('You can only delete study rooms that you created.');
+      return;
+    }
     if (window.confirm('Are you sure you want to delete this study room? This action cannot be undone.')) {
       try {
         await deleteStudyRoom(roomId);
@@ -113,9 +117,9 @@ export default function StudyRooms() {
                   <Globe className="w-3 h-3" />
                   PUBLIC
                 </div>
-                {user && user.uid === room.createdBy && (
+                {user && (
                   <button
-                    onClick={(e) => handleDeleteRoom(room.id!, e)}
+                    onClick={(e) => handleDeleteRoom(room.id!, room.createdBy, e)}
                     className="p-1 text-red-400 hover:text-red-300 hover:bg-red-500/10 rounded transition-colors"
                     title="Delete Room"
                   >

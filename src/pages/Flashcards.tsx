@@ -142,7 +142,7 @@ export default function Flashcards() {
       }
     } catch (error) {
       console.error("Error generating cards:", error);
-      alert('Failed to generate flashcards. Please try again.');
+      alert(`Failed to generate flashcards: ${error.message || 'Please try again.'}`);
     } finally {
       setLoading(false);
     }

@@ -22,6 +22,7 @@ export default function YouTubeSummarizer() {
       setResult(data);
     } catch (error) {
       console.error(error);
+      alert(`Failed to summarize video: ${error.message || 'Please try again.'}`);
     } finally {
       setLoading(false);
     }
