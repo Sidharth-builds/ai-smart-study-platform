@@ -3,9 +3,8 @@ import { Layers, Plus, Search, Sparkles, X, ChevronLeft, ChevronRight, RotateCw,
 import { motion, AnimatePresence } from 'motion/react';
 import { generateFlashcards } from '../lib/gemini';
 import { db } from '../lib/firebase';
-import { collection, addDoc, Timestamp, updateDoc, deleteDoc, doc } from 'firebase/firestore';
+import { collection, addDoc, Timestamp, updateDoc, doc } from 'firebase/firestore';
 import { useAuth } from '../lib/AuthContext';
-import { COLLECTIONS } from '../lib/firebaseService';
 import { getFlashcardDecks } from '../services/flashcardService';
 import { jsPDF } from 'jspdf';
 
@@ -22,6 +21,12 @@ interface Deck {
   cards: Flashcard[];
   createdAt: Timestamp;
 }
+
+type StoredDeckCard = {
+  question: string;
+  answer: string;
+  mastered: boolean;
+};
 
 export default function Flashcards() {
   const [showGenerator, setShowGenerator] = useState(false);
@@ -75,7 +80,11 @@ export default function Flashcards() {
   const syncDeckCards = async (deckId: string, updatedCards: Flashcard[]) => {
     try {
       await updateDoc(doc(db, 'decks', deckId), {
-        cards: updatedCards,
+        cards: updatedCards.map((card) => ({
+          question: card.front,
+          answer: card.back,
+          mastered: card.mastered,
+        })),
         cardCount: updatedCards.length,
         masteredCount: updatedCards.filter((card) => card.mastered).length,
       });
@@ -92,38 +101,23 @@ export default function Flashcards() {
 
     try {
       const title = `Generated Deck - ${new Date().toLocaleString()}`;
+      const storedCards: StoredDeckCard[] = generatedCards.map((card) => ({
+        question: card.front,
+        answer: card.back,
+        mastered: Boolean(card.mastered),
+      }));
+
       const deckRef = await addDoc(collection(db, 'decks'), {
         userId: user.uid,
         title,
-        cards: [],
-        cardCount: generatedCards.length,
-        masteredCount: 0,
+        cards: storedCards,
+        cardCount: storedCards.length,
+        masteredCount: storedCards.filter((card) => card.mastered).length,
         createdAt: Timestamp.now(),
       });
 
-      const savePromises = generatedCards.map((card) =>
-        addDoc(collection(db, COLLECTIONS.FLASHCARDS), {
-          userId: user.uid,
-          deckId: deckRef.id,
-          question: card.front,
-          answer: card.back,
-          mastered: false,
-          createdAt: Timestamp.now(),
-        }),
-      );
-
-      const docRefs = await Promise.all(savePromises);
-      const cardsWithIds = generatedCards.map((card, index) => ({
-        ...card,
-        id: docRefs[index].id,
-      }));
-
-      await updateDoc(doc(db, 'decks', deckRef.id), {
-        cards: cardsWithIds,
-      });
-
       console.log('Deck saved successfully');
-      return { deckId: deckRef.id, cardsWithIds };
+      return { deckId: deckRef.id, cardsWithIds: generatedCards };
     } catch (error) {
       console.error('Error saving deck:', error);
       return { deckId: null, cardsWithIds: generatedCards };
@@ -188,11 +182,10 @@ export default function Flashcards() {
     }
   };
 
-  const markAsMastered = async (cardId: string, mastered: boolean) => {
+  const markAsMastered = async (cardIndex: number, mastered: boolean) => {
     try {
-      await updateDoc(doc(db, COLLECTIONS.FLASHCARDS, cardId), { mastered: !mastered });
-      const updatedCards = cards.map(card =>
-        card.id === cardId ? { ...card, mastered: !mastered } : card
+      const updatedCards = cards.map((card, index) =>
+        index === cardIndex ? { ...card, mastered: !mastered } : card
       );
       setCards(updatedCards);
       if (currentDeckId) {
@@ -204,11 +197,10 @@ export default function Flashcards() {
     }
   };
 
-  const deleteCard = async (cardId: string) => {
+  const deleteCard = async (cardIndex: number) => {
     if (!window.confirm('Are you sure you want to delete this flashcard?')) return;
     try {
-      await deleteDoc(doc(db, COLLECTIONS.FLASHCARDS, cardId));
-      const updatedCards = cards.filter(card => card.id !== cardId);
+      const updatedCards = cards.filter((_, index) => index !== cardIndex);
       setCards(updatedCards);
       if (currentDeckId) {
         await syncDeckCards(currentDeckId, updatedCards);
@@ -224,8 +216,8 @@ export default function Flashcards() {
     }
   };
 
-  const startEdit = (card: Flashcard) => {
-    setEditingCard(card.id!);
+  const startEdit = (card: Flashcard, index: number) => {
+    setEditingCard(String(index));
     setEditFront(card.front);
     setEditBack(card.back);
   };
@@ -233,12 +225,9 @@ export default function Flashcards() {
   const saveEdit = async () => {
     if (editingCard) {
       try {
-        await updateDoc(doc(db, COLLECTIONS.FLASHCARDS, editingCard), { 
-          question: editFront, 
-          answer: editBack 
-        });
-        const updatedCards = cards.map(card => 
-          card.id === editingCard ? { ...card, front: editFront, back: editBack } : card
+        const editingIndex = Number(editingCard);
+        const updatedCards = cards.map((card, index) => 
+          index === editingIndex ? { ...card, front: editFront, back: editBack } : card
         );
         setCards(updatedCards);
         if (currentDeckId) {
@@ -477,7 +466,7 @@ export default function Flashcards() {
             ) : (
               <>
                 <button 
-                  onClick={() => markAsMastered(cards[currentIndex].id!, cards[currentIndex].mastered)}
+                  onClick={() => markAsMastered(currentIndex, cards[currentIndex].mastered)}
                   className={`px-4 py-2 rounded-lg font-bold flex items-center gap-2 transition-all ${
                     cards[currentIndex].mastered 
                       ? 'bg-yellow-600 hover:bg-yellow-500 text-white' 
@@ -487,14 +476,14 @@ export default function Flashcards() {
                   {cards[currentIndex].mastered ? 'Unmark Mastered' : 'Mark Mastered'}
                 </button>
                 <button 
-                  onClick={() => startEdit(cards[currentIndex])}
+                  onClick={() => startEdit(cards[currentIndex], currentIndex)}
                   className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg font-bold flex items-center gap-2 transition-all"
                 >
                   <Edit className="w-4 h-4" />
                   Edit
                 </button>
                 <button 
-                  onClick={() => deleteCard(cards[currentIndex].id!)}
+                  onClick={() => deleteCard(currentIndex)}
                   className="bg-red-600 hover:bg-red-500 text-white px-4 py-2 rounded-lg font-bold flex items-center gap-2 transition-all"
                 >
                   <Trash2 className="w-4 h-4" />

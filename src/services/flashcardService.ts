@@ -3,7 +3,6 @@ import { db } from '../lib/firebase';
 
 // Interfaces
 export interface Flashcard {
-  id?: string;
   front: string;
   back: string;
   mastered: boolean;
@@ -50,9 +49,8 @@ export const getFlashcardDecks = async (userId: string): Promise<Deck[]> => {
     title: deck.title ?? 'Generated Deck',
     cards: Array.isArray(deck.cards)
       ? deck.cards.map((card: any) => ({
-          id: card.id,
-          front: card.front,
-          back: card.back,
+          front: card.question ?? card.front ?? '',
+          back: card.answer ?? card.back ?? '',
           mastered: Boolean(card.mastered),
         }))
       : [],
