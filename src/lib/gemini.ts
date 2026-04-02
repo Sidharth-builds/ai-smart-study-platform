@@ -11,6 +11,11 @@ type Flashcard = {
   back: string;
 };
 
+type GeneratedFlashcard = {
+  question: string;
+  answer: string;
+};
+
 type PreviousPaperAnalysis = {
   questions: string[];
   topics: { name: string; frequency: string }[];
@@ -49,6 +54,13 @@ export const getAI = () => {
 };
 
 const cleanJsonText = (text: string) => text.replace(/```json\s*|```/gi, "").trim();
+
+const cleanText = (text: string): string => {
+  return text
+    .replace(/\s+/g, " ")
+    .replace(/\n+/g, "\n")
+    .trim();
+};
 
 const parseJsonResponse = <T>(text: string): T => {
   const cleanedText = cleanJsonText(text);
@@ -118,27 +130,74 @@ ${text}
 
 export const generateFlashcards = async (text: string): Promise<Flashcard[]> => {
   try {
-    const flashcards = await generateJson<Flashcard[]>(`
-Generate 5 to 10 study flashcards from the text below.
-Respond with valid JSON only.
-Do not include markdown fences.
-Return an array in this exact format:
+    const input = cleanText(text).slice(0, 5000);
+
+    if (!input) {
+      throw new Error("Unable to extract meaningful content");
+    }
+
+    const concepts = await generateJson<string[]>(`
+From the following study material, extract the most important concepts, definitions, and key topics.
+
+Rules:
+- Ignore metadata, formatting, and noise
+- Focus only on meaningful academic content
+- Return a list of key points
+
+Return JSON:
 [
-  { "front": "question", "back": "answer" }
+  "concept 1",
+  "concept 2",
+  "concept 3"
 ]
 
-Text:
-${text}
+Study material:
+${input}
+`);
+
+    if (!Array.isArray(concepts)) {
+      throw new Error("Gemini concept extraction response was not an array.");
+    }
+
+    const filteredConcepts = concepts.filter(
+      (concept): concept is string => typeof concept === "string" && concept.trim().length > 0,
+    );
+
+    if (filteredConcepts.length === 0) {
+      throw new Error("Unable to extract meaningful content");
+    }
+
+    const flashcards = await generateJson<GeneratedFlashcard[]>(`
+Generate exam-style flashcards from these concepts.
+
+Rules:
+- Questions must be clear and meaningful
+- Focus on definitions and explanations
+- Avoid trivial or irrelevant questions
+
+Return JSON:
+[
+  { "question": "...", "answer": "..." }
+]
+
+Concepts:
+${filteredConcepts.map((concept, index) => `${index + 1}. ${concept}`).join("\n")}
 `);
 
     if (!Array.isArray(flashcards)) {
       throw new Error("Gemini flashcard response was not an array.");
     }
 
-    return flashcards.filter(
-      (card): card is Flashcard =>
-        typeof card?.front === "string" && typeof card?.back === "string",
-    );
+    return flashcards
+      .filter(
+        (card): card is GeneratedFlashcard =>
+          typeof card?.question === "string" && card.question.trim().length > 0 &&
+          typeof card?.answer === "string" && card.answer.trim().length > 0,
+      )
+      .map((card) => ({
+        front: card.question.trim(),
+        back: card.answer.trim(),
+      }));
   } catch (error) {
     console.error("Gemini Flashcard Error:", error);
     throw error;
