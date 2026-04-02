@@ -3,9 +3,8 @@ import { Layers, Plus, Search, Sparkles, X, ChevronLeft, ChevronRight, RotateCw,
 import { motion, AnimatePresence } from 'motion/react';
 import { generateFlashcards } from '../lib/gemini';
 import { db } from '../lib/firebase';
-import { collection, addDoc, Timestamp, updateDoc, doc } from 'firebase/firestore';
+import { collection, addDoc, Timestamp, updateDoc, doc, query, where, getDocs, deleteDoc } from 'firebase/firestore';
 import { useAuth } from '../lib/AuthContext';
-import { getFlashcardDecks } from '../services/flashcardService';
 import { jsPDF } from 'jspdf';
 
 interface Flashcard {
@@ -15,19 +14,6 @@ interface Flashcard {
   mastered: boolean;
 }
 
-interface Deck {
-  id: string;
-  title: string;
-  cards: Flashcard[];
-  createdAt: Timestamp;
-}
-
-type StoredDeckCard = {
-  question: string;
-  answer: string;
-  mastered: boolean;
-};
-
 export default function Flashcards() {
   const [showGenerator, setShowGenerator] = useState(false);
   const [showPractice, setShowPractice] = useState(false);
@@ -35,9 +21,8 @@ export default function Flashcards() {
   const [cards, setCards] = useState<Flashcard[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isFlipped, setIsFlipped] = useState(false);
-  const [decks, setDecks] = useState<Deck[]>([]);
-  const [decksLoading, setDecksLoading] = useState(true);
-  const [currentDeckId, setCurrentDeckId] = useState<string | null>(null);
+  const [savedFlashcards, setSavedFlashcards] = useState<Flashcard[]>([]);
+  const [flashcardsLoading, setFlashcardsLoading] = useState(true);
   const [inputType, setInputType] = useState<'text' | 'file' | 'url' | 'youtube'>('text');
   const [textInput, setTextInput] = useState('');
   const [fileInput, setFileInput] = useState<File | null>(null);
@@ -51,7 +36,7 @@ export default function Flashcards() {
 
   useEffect(() => {
     if (user) {
-      fetchDecks();
+      fetchFlashcards();
     }
   }, [user]);
 
@@ -65,62 +50,66 @@ export default function Flashcards() {
     }
   }, [fileInput]);
 
-  const fetchDecks = async () => {
+  const fetchFlashcards = async () => {
     if (!user) return;
     try {
-      const fetchedDecks = await getFlashcardDecks(user.uid);
-      setDecks(fetchedDecks);
-    } catch (error) {
-      console.error("Error fetching decks:", error);
-    } finally {
-      setDecksLoading(false);
-    }
-  };
+      const q = query(
+        collection(db, 'Flashcards'),
+        where('userId', '==', user.uid),
+      );
+      const snapshot = await getDocs(q);
+      const flashcards = snapshot.docs.map((docSnapshot) => {
+        const data = docSnapshot.data() as {
+          question?: string;
+          answer?: string;
+          front?: string;
+          back?: string;
+          mastered?: boolean;
+        };
 
-  const syncDeckCards = async (deckId: string, updatedCards: Flashcard[]) => {
-    try {
-      await updateDoc(doc(db, 'decks', deckId), {
-        cards: updatedCards.map((card) => ({
-          question: card.front,
-          answer: card.back,
-          mastered: card.mastered,
-        })),
-        cardCount: updatedCards.length,
-        masteredCount: updatedCards.filter((card) => card.mastered).length,
+        return {
+          id: docSnapshot.id,
+          front: data.question ?? data.front ?? '',
+          back: data.answer ?? data.back ?? '',
+          mastered: Boolean(data.mastered),
+        };
       });
+
+      setSavedFlashcards(flashcards);
     } catch (error) {
-      console.error('Error syncing deck:', error);
+      console.error("Error fetching flashcards:", error);
+    } finally {
+      setFlashcardsLoading(false);
     }
   };
 
-  const saveDeck = async (generatedCards: Flashcard[]) => {
+  const saveGeneratedCards = async (generatedCards: Flashcard[]) => {
     if (!user) {
       console.error('User not logged in');
-      return { deckId: null, cardsWithIds: generatedCards };
+      return generatedCards;
     }
 
     try {
-      const title = `Generated Deck - ${new Date().toLocaleString()}`;
-      const storedCards: StoredDeckCard[] = generatedCards.map((card) => ({
-        question: card.front,
-        answer: card.back,
-        mastered: Boolean(card.mastered),
+      const savePromises = generatedCards.map((card) =>
+        addDoc(collection(db, 'Flashcards'), {
+          userId: user.uid,
+          question: card.front,
+          answer: card.back,
+          mastered: Boolean(card.mastered),
+          createdAt: Timestamp.now(),
+        }),
+      );
+
+      const docRefs = await Promise.all(savePromises);
+      console.log('Flashcards saved successfully');
+
+      return generatedCards.map((card, index) => ({
+        ...card,
+        id: docRefs[index].id,
       }));
-
-      const deckRef = await addDoc(collection(db, 'decks'), {
-        userId: user.uid,
-        title,
-        cards: storedCards,
-        cardCount: storedCards.length,
-        masteredCount: storedCards.filter((card) => card.mastered).length,
-        createdAt: Timestamp.now(),
-      });
-
-      console.log('Deck saved successfully');
-      return { deckId: deckRef.id, cardsWithIds: generatedCards };
     } catch (error) {
-      console.error('Error saving deck:', error);
-      return { deckId: null, cardsWithIds: generatedCards };
+      console.error('Error saving flashcards:', error);
+      return generatedCards;
     }
   };
 
@@ -165,15 +154,14 @@ export default function Flashcards() {
 
       const generatedCards = await generateFlashcards(text);
       const cardsWithMastered = generatedCards.map(card => ({ ...card, mastered: false }));
-      const { deckId, cardsWithIds } = await saveDeck(cardsWithMastered);
+      const savedCardsWithIds = await saveGeneratedCards(cardsWithMastered);
 
-      setCards(cardsWithIds);
-      setCurrentDeckId(deckId);
+      setCards(savedCardsWithIds);
       setShowGenerator(false);
       setShowPractice(true);
       setCurrentIndex(0);
       setIsFlipped(false);
-      fetchDecks();
+      fetchFlashcards();
     } catch (error) {
       console.error("Error generating cards:", error);
       alert(`Failed to generate flashcards: ${error.message || 'Please try again.'}`);
@@ -184,14 +172,20 @@ export default function Flashcards() {
 
   const markAsMastered = async (cardIndex: number, mastered: boolean) => {
     try {
+      const currentCard = cards[cardIndex];
+      if (!currentCard?.id) return;
+
+      await updateDoc(doc(db, 'Flashcards', currentCard.id), { mastered: !mastered });
+
       const updatedCards = cards.map((card, index) =>
-        index === cardIndex ? { ...card, mastered: !mastered } : card
+        index === cardIndex ? { ...card, mastered: !mastered } : card,
       );
       setCards(updatedCards);
-      if (currentDeckId) {
-        await syncDeckCards(currentDeckId, updatedCards);
-      }
-      fetchDecks(); // Update deck mastery
+      setSavedFlashcards((prev) =>
+        prev.map((card) =>
+          card.id === currentCard.id ? { ...card, mastered: !mastered } : card,
+        ),
+      );
     } catch (error) {
       console.error('Error updating card:', error);
     }
@@ -200,24 +194,27 @@ export default function Flashcards() {
   const deleteCard = async (cardIndex: number) => {
     if (!window.confirm('Are you sure you want to delete this flashcard?')) return;
     try {
+      const currentCard = cards[cardIndex];
+      if (!currentCard?.id) return;
+
+      await deleteDoc(doc(db, 'Flashcards', currentCard.id));
+
       const updatedCards = cards.filter((_, index) => index !== cardIndex);
       setCards(updatedCards);
-      if (currentDeckId) {
-        await syncDeckCards(currentDeckId, updatedCards);
-      }
+      setSavedFlashcards((prev) => prev.filter((card) => card.id !== currentCard.id));
       if (cards.length === 1) {
         setShowPractice(false);
       } else if (currentIndex >= cards.length - 1) {
         setCurrentIndex(Math.max(0, currentIndex - 1));
       }
-      fetchDecks();
     } catch (error) {
       console.error('Error deleting card:', error);
     }
   };
 
-  const startEdit = (card: Flashcard, index: number) => {
-    setEditingCard(String(index));
+  const startEdit = (card: Flashcard) => {
+    if (!card.id) return;
+    setEditingCard(card.id);
     setEditFront(card.front);
     setEditBack(card.back);
   };
@@ -225,14 +222,23 @@ export default function Flashcards() {
   const saveEdit = async () => {
     if (editingCard) {
       try {
-        const editingIndex = Number(editingCard);
+        const currentCard = cards.find((card) => card.id === editingCard);
+        if (!currentCard?.id) return;
+
+        await updateDoc(doc(db, 'Flashcards', currentCard.id), {
+          question: editFront,
+          answer: editBack,
+        });
+
         const updatedCards = cards.map((card, index) => 
-          index === editingIndex ? { ...card, front: editFront, back: editBack } : card
+          card.id === editingCard ? { ...card, front: editFront, back: editBack } : card,
         );
         setCards(updatedCards);
-        if (currentDeckId) {
-          await syncDeckCards(currentDeckId, updatedCards);
-        }
+        setSavedFlashcards((prev) =>
+          prev.map((card) =>
+            card.id === editingCard ? { ...card, front: editFront, back: editBack } : card,
+          ),
+        );
         setEditingCard(null);
       } catch (error) {
         console.error('Error updating card:', error);
@@ -281,11 +287,10 @@ export default function Flashcards() {
     doc.save("flashcards.pdf");
   };
 
-  const openDeck = (deck: Deck) => {
-    setCards(deck.cards);
-    setCurrentDeckId(deck.id);
+  const openFlashcards = (startIndex: number) => {
+    setCards(savedFlashcards);
     setShowPractice(true);
-    setCurrentIndex(0);
+    setCurrentIndex(startIndex);
     setIsFlipped(false);
     setEditingCard(null);
   };
@@ -323,29 +328,26 @@ export default function Flashcards() {
             <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-500" />
             <input 
               type="text" 
-              placeholder="Search your decks..."
+              placeholder="Search your flashcards..."
               className="w-full bg-[#0d1425] border border-slate-800 rounded-xl pl-12 pr-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/50"
             />
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {decksLoading ? (
+            {flashcardsLoading ? (
               <div className="col-span-full text-center py-12">
-                <p className="text-slate-400">Loading decks...</p>
+                <p className="text-slate-400">Loading flashcards...</p>
               </div>
-            ) : decks.length === 0 ? (
+            ) : savedFlashcards.length === 0 ? (
               <div className="col-span-full text-center py-12">
-                <p className="text-slate-400">No decks yet. Generate your first flashcards!</p>
+                <p className="text-slate-400">No flashcards yet. Generate your first flashcards!</p>
               </div>
             ) : (
-              decks.map((deck) => {
-                const totalCards = deck.cards.length;
-                const masteredCards = deck.cards.filter(c => c.mastered).length;
-                const masteryPercentage = totalCards > 0 ? Math.round((masteredCards / totalCards) * 100) : 0;
+              savedFlashcards.map((flashcard, index) => {
                 return (
                   <div
-                    key={deck.id}
-                    onClick={() => openDeck(deck)}
+                    key={flashcard.id}
+                    onClick={() => openFlashcards(index)}
                     className="bg-[#0d1425] border border-slate-800 p-6 rounded-2xl hover:border-indigo-500/50 transition-all cursor-pointer group"
                   >
                     <div className="flex justify-between items-start mb-6">
@@ -353,18 +355,11 @@ export default function Flashcards() {
                         <Layers className="w-6 h-6 text-indigo-500" />
                       </div>
                       <span className="text-xs font-bold text-slate-500 uppercase">
-                        {masteryPercentage}% Mastered
+                        {flashcard.mastered ? 'Mastered' : 'Learning'}
                       </span>
                     </div>
-                    <h3 className="text-xl font-bold text-white mb-2">{deck.title}</h3>
-                    <p className="text-slate-400 text-sm mb-6">{totalCards} cards total</p>
-                    
-                    <div className="w-full h-2 bg-slate-800 rounded-full overflow-hidden">
-                      <div 
-                        className="h-full bg-indigo-500 rounded-full" 
-                        style={{ width: `${masteryPercentage}%` }}
-                      />
-                    </div>
+                    <h3 className="text-xl font-bold text-white mb-2 line-clamp-3">{flashcard.front}</h3>
+                    <p className="text-slate-400 text-sm line-clamp-4">{flashcard.back}</p>
                   </div>
                 );
               })
@@ -375,7 +370,7 @@ export default function Flashcards() {
         <div className="max-w-2xl mx-auto space-y-8">
           <div className="flex justify-between items-center">
             <button onClick={() => setShowPractice(false)} className="text-slate-400 hover:text-white flex items-center gap-2">
-              <ChevronLeft className="w-5 h-5" /> Back to Decks
+              <ChevronLeft className="w-5 h-5" /> Back to Flashcards
             </button>
             <span className="text-slate-500 font-bold">Card {currentIndex + 1} of {cards.length}</span>
           </div>
@@ -476,7 +471,7 @@ export default function Flashcards() {
                   {cards[currentIndex].mastered ? 'Unmark Mastered' : 'Mark Mastered'}
                 </button>
                 <button 
-                  onClick={() => startEdit(cards[currentIndex], currentIndex)}
+                  onClick={() => startEdit(cards[currentIndex])}
                   className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg font-bold flex items-center gap-2 transition-all"
                 >
                   <Edit className="w-4 h-4" />
