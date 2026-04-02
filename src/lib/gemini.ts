@@ -1,206 +1,193 @@
-import { GoogleGenAI, Type } from "@google/genai";
+import { GoogleGenerativeAI } from "@google/generative-ai";
 
-const getAI = () => {
+type StudyContent = {
+  summary: string;
+  bulletPoints: string[];
+  keyConcepts: string[];
+};
+
+type Flashcard = {
+  front: string;
+  back: string;
+};
+
+type PreviousPaperAnalysis = {
+  questions: string[];
+  topics: { name: string; frequency: string }[];
+  insights: string;
+};
+
+type YouTubeSummary = {
+  summary: string;
+  keyPoints: string[];
+  timestamps: { time: string; topic: string }[];
+  examTopics: string[];
+};
+
+type PredictedQuestion = {
+  text: string;
+  probability: number;
+  reason: string;
+};
+
+type TopicInput = {
+  name: string;
+  score: number;
+};
+
+const GEMINI_MODEL = "gemini-1.5-flash";
+
+export const getAI = () => {
   const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
+
   if (!apiKey) {
-    throw new Error("VITE_GEMINI_API_KEY is not set in environment variables.");
+    throw new Error("Missing Gemini API key. Set VITE_GEMINI_API_KEY in your Vite environment.");
   }
-  return new GoogleGenAI({ apiKey });
+
+  return new GoogleGenerativeAI(apiKey);
 };
 
-const parseAIResponse = (text: string | undefined) => {
-  if (!text) return null;
+const cleanJsonText = (text: string) => text.replace(/```json\s*|```/gi, "").trim();
+
+const parseJsonResponse = <T>(text: string): T => {
+  const cleanedText = cleanJsonText(text);
+
   try {
-    // Remove markdown code blocks if present
-    const cleanText = text.replace(/```json\n?|```/g, "").trim();
-    return JSON.parse(cleanText);
-  } catch (e) {
-    console.error("Failed to parse AI response:", e);
-    return null;
+    return JSON.parse(cleanedText) as T;
+  } catch (error) {
+    console.error("Failed to parse Gemini JSON response:", error, cleanedText);
+    throw new Error("Gemini returned an invalid JSON response.");
   }
 };
 
-export const generateStudyContent = async (text: string): Promise<{ summary: string; bulletPoints: string[]; keyConcepts: string[] }> => {
+const generateJson = async <T>(prompt: string): Promise<T> => {
+  const genAI = getAI();
+  const model = genAI.getGenerativeModel({ model: GEMINI_MODEL });
+  const result = await model.generateContent(prompt);
+  const text = result.response.text();
+
+  if (!text) {
+    throw new Error("Gemini returned an empty response.");
+  }
+
+  return parseJsonResponse<T>(text);
+};
+
+export const generateStudyContent = async (text: string): Promise<StudyContent> => {
   try {
-    const ai = getAI();
-    const response = await ai.models.generateContent({
-      model: "gemini-2.0-flash",
-      contents: `Analyze the following study material and provide:
-      1. A concise summary.
-      2. A list of key bullet points.
-      3. A list of core key concepts.
-      
-      Text: ${text}`,
-      config: {
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            summary: { type: Type.STRING },
-            bulletPoints: { type: Type.ARRAY, items: { type: Type.STRING } },
-            keyConcepts: { type: Type.ARRAY, items: { type: Type.STRING } }
-          },
-          required: ["summary", "bulletPoints", "keyConcepts"]
-        }
-      }
-    });
-    
-    return parseAIResponse(response.text) || { summary: "", bulletPoints: [], keyConcepts: [] };
+    return await generateJson<StudyContent>(`
+Analyze the following study material and respond with valid JSON only.
+
+Return this exact shape:
+{
+  "summary": "string",
+  "bulletPoints": ["string"],
+  "keyConcepts": ["string"]
+}
+
+Text:
+${text}
+`);
   } catch (error) {
     console.error("Gemini Summarizer Error:", error);
     throw error;
   }
 };
 
-export const generateFlashcards = async (text: string): Promise<{ front: string; back: string }[]> => {
+export const generateFlashcards = async (text: string): Promise<Flashcard[]> => {
   try {
-    const ai = getAI();
-    const response = await ai.models.generateContent({
-      model: "gemini-2.0-flash",
-      contents: `Generate 5-10 effective study flashcards from the following text. Each flashcard should have a 'front' (question/term) and a 'back' (answer/definition).
-      
-      Text: ${text}`,
-      config: {
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.ARRAY,
-          items: {
-            type: Type.OBJECT,
-            properties: {
-              front: { type: Type.STRING },
-              back: { type: Type.STRING }
-            },
-            required: ["front", "back"]
-          }
-        }
-      }
-    });
-    
-    return parseAIResponse(response.text) || [];
+    const flashcards = await generateJson<Flashcard[]>(`
+Generate 5 to 10 study flashcards from the text below.
+Respond with valid JSON only.
+Do not include markdown fences.
+Return an array in this exact format:
+[
+  { "front": "question", "back": "answer" }
+]
+
+Text:
+${text}
+`);
+
+    if (!Array.isArray(flashcards)) {
+      throw new Error("Gemini flashcard response was not an array.");
+    }
+
+    return flashcards.filter(
+      (card): card is Flashcard =>
+        typeof card?.front === "string" && typeof card?.back === "string",
+    );
   } catch (error) {
     console.error("Gemini Flashcard Error:", error);
     throw error;
   }
 };
 
-export const analyzePreviousPaper = async (text: string): Promise<{ questions: string[]; topics: { name: string; frequency: string }[]; insights: string }> => {
+export const analyzePreviousPaper = async (
+  text: string,
+): Promise<PreviousPaperAnalysis> => {
   try {
-    const ai = getAI();
-    const response = await ai.models.generateContent({
-      model: "gemini-2.0-flash",
-      contents: `Analyze this previous year exam paper. 
-      1. Extract the main questions.
-      2. Categorize them by topic and estimate their frequency/importance.
-      3. Provide overall insights on the paper's difficulty and focus areas.
-      
-      Paper Content: ${text}`,
-      config: {
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            questions: { type: Type.ARRAY, items: { type: Type.STRING } },
-            topics: { 
-              type: Type.ARRAY, 
-              items: { 
-                type: Type.OBJECT,
-                properties: {
-                  name: { type: Type.STRING },
-                  frequency: { type: Type.STRING }
-                },
-                required: ["name", "frequency"]
-              } 
-            },
-            insights: { type: Type.STRING }
-          },
-          required: ["questions", "topics", "insights"]
-        }
-      }
-    });
-    
-    return parseAIResponse(response.text) || { questions: [], topics: [], insights: "" };
+    return await generateJson<PreviousPaperAnalysis>(`
+Analyze this previous year exam paper and respond with valid JSON only.
+
+Return this exact shape:
+{
+  "questions": ["string"],
+  "topics": [{ "name": "string", "frequency": "string" }],
+  "insights": "string"
+}
+
+Paper Content:
+${text}
+`);
   } catch (error) {
     console.error("Gemini Paper Analysis Error:", error);
     throw error;
   }
 };
 
-export const summarizeYouTubeVideo = async (videoUrl: string): Promise<{ summary: string; keyPoints: string[]; timestamps: { time: string; topic: string }[]; examTopics: string[] }> => {
+export const summarizeYouTubeVideo = async (
+  videoUrl: string,
+): Promise<YouTubeSummary> => {
   try {
-    const ai = getAI();
-    const response = await ai.models.generateContent({
-      model: "gemini-2.0-flash",
-      contents: `Analyze the educational content from this YouTube video: ${videoUrl}. 
-      Provide:
-      1. A high-level summary.
-      2. Key learning points.
-      3. Estimated timestamps for major sections.
-      4. Specific topics that are highly relevant for exams.`,
-      config: {
-        tools: [{ urlContext: {} }],
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            summary: { type: Type.STRING },
-            keyPoints: { type: Type.ARRAY, items: { type: Type.STRING } },
-            timestamps: { 
-              type: Type.ARRAY, 
-              items: { 
-                type: Type.OBJECT,
-                properties: {
-                  time: { type: Type.STRING },
-                  topic: { type: Type.STRING }
-                },
-                required: ["time", "topic"]
-              } 
-            },
-            examTopics: { type: Type.ARRAY, items: { type: Type.STRING } }
-          },
-          required: ["summary", "keyPoints", "timestamps", "examTopics"]
-        }
-      }
-    });
-    
-    return parseAIResponse(response.text) || { summary: "", keyPoints: [], timestamps: [], examTopics: [] };
+    return await generateJson<YouTubeSummary>(`
+Analyze the educational YouTube video at this URL and respond with valid JSON only:
+${videoUrl}
+
+Return this exact shape:
+{
+  "summary": "string",
+  "keyPoints": ["string"],
+  "timestamps": [{ "time": "string", "topic": "string" }],
+  "examTopics": ["string"]
+}
+`);
   } catch (error) {
     console.error("Gemini YouTube Error:", error);
     throw error;
   }
 };
 
-export const predictExamQuestions = async (subject: string, topics: any[]): Promise<{ questions: { text: string; probability: number; reason: string }[] }> => {
+export const predictExamQuestions = async (
+  subject: string,
+  topics: TopicInput[],
+): Promise<{ questions: PredictedQuestion[] }> => {
   try {
-    const ai = getAI();
-    const topicsList = topics.map(t => `${t.name} (Importance Score: ${t.score})`).join(', ');
-    const response = await ai.models.generateContent({
-      model: "gemini-2.0-flash",
-      contents: `As an expert examiner for the subject "${subject}", analyze these prioritized topics: ${topicsList}. 
-      Predict the most likely exam questions. For each question, provide a probability of appearance (0-100) and a brief reasoning based on the topic's importance.`,
-      config: {
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            questions: {
-              type: Type.ARRAY,
-              items: {
-                type: Type.OBJECT,
-                properties: {
-                  text: { type: Type.STRING },
-                  probability: { type: Type.NUMBER },
-                  reason: { type: Type.STRING }
-                },
-                required: ["text", "probability", "reason"]
-              }
-            }
-          },
-          required: ["questions"]
-        }
-      }
-    });
-    
-    return parseAIResponse(response.text) || { questions: [] };
+    const topicsList = topics
+      .map((topic) => `${topic.name} (Importance Score: ${topic.score})`)
+      .join(", ");
+
+    return await generateJson<{ questions: PredictedQuestion[] }>(`
+As an expert examiner for "${subject}", analyze these prioritized topics:
+${topicsList}
+
+Respond with valid JSON only in this exact shape:
+{
+  "questions": [
+    { "text": "string", "probability": 0, "reason": "string" }
+  ]
+}
+`);
   } catch (error) {
     console.error("Gemini Prediction Error:", error);
     throw error;
