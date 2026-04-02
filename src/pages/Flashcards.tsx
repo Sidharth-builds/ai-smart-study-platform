@@ -32,6 +32,7 @@ export default function Flashcards() {
   const [isFlipped, setIsFlipped] = useState(false);
   const [decks, setDecks] = useState<Deck[]>([]);
   const [decksLoading, setDecksLoading] = useState(true);
+  const [currentDeckId, setCurrentDeckId] = useState<string | null>(null);
   const [inputType, setInputType] = useState<'text' | 'file' | 'url' | 'youtube'>('text');
   const [textInput, setTextInput] = useState('');
   const [fileInput, setFileInput] = useState<File | null>(null);
@@ -68,6 +69,64 @@ export default function Flashcards() {
       console.error("Error fetching decks:", error);
     } finally {
       setDecksLoading(false);
+    }
+  };
+
+  const syncDeckCards = async (deckId: string, updatedCards: Flashcard[]) => {
+    try {
+      await updateDoc(doc(db, 'decks', deckId), {
+        cards: updatedCards,
+        cardCount: updatedCards.length,
+        masteredCount: updatedCards.filter((card) => card.mastered).length,
+      });
+    } catch (error) {
+      console.error('Error syncing deck:', error);
+    }
+  };
+
+  const saveDeck = async (generatedCards: Flashcard[]) => {
+    if (!user) {
+      console.error('User not logged in');
+      return { deckId: null, cardsWithIds: generatedCards };
+    }
+
+    try {
+      const title = `Generated Deck - ${new Date().toLocaleString()}`;
+      const deckRef = await addDoc(collection(db, 'decks'), {
+        userId: user.uid,
+        title,
+        cards: [],
+        cardCount: generatedCards.length,
+        masteredCount: 0,
+        createdAt: Timestamp.now(),
+      });
+
+      const savePromises = generatedCards.map((card) =>
+        addDoc(collection(db, COLLECTIONS.FLASHCARDS), {
+          userId: user.uid,
+          deckId: deckRef.id,
+          question: card.front,
+          answer: card.back,
+          mastered: false,
+          createdAt: Timestamp.now(),
+        }),
+      );
+
+      const docRefs = await Promise.all(savePromises);
+      const cardsWithIds = generatedCards.map((card, index) => ({
+        ...card,
+        id: docRefs[index].id,
+      }));
+
+      await updateDoc(doc(db, 'decks', deckRef.id), {
+        cards: cardsWithIds,
+      });
+
+      console.log('Deck saved successfully');
+      return { deckId: deckRef.id, cardsWithIds };
+    } catch (error) {
+      console.error('Error saving deck:', error);
+      return { deckId: null, cardsWithIds: generatedCards };
     }
   };
 
@@ -112,34 +171,15 @@ export default function Flashcards() {
 
       const generatedCards = await generateFlashcards(text);
       const cardsWithMastered = generatedCards.map(card => ({ ...card, mastered: false }));
+      const { deckId, cardsWithIds } = await saveDeck(cardsWithMastered);
 
-      setCards(cardsWithMastered);
+      setCards(cardsWithIds);
+      setCurrentDeckId(deckId);
       setShowGenerator(false);
       setShowPractice(true);
       setCurrentIndex(0);
       setIsFlipped(false);
-
-      // Save individual flashcards to Firestore
-      if (user) {
-        const savePromises = cardsWithMastered.map(card =>
-          addDoc(collection(db, COLLECTIONS.FLASHCARDS), {
-            userId: user.uid,
-            question: card.front,
-            answer: card.back,
-            mastered: false,
-            createdAt: Timestamp.now(),
-          })
-        );
-        const docRefs = await Promise.all(savePromises);
-        // Add ids to cards
-        const cardsWithIds = cardsWithMastered.map((card, index) => ({
-          ...card,
-          id: docRefs[index].id
-        }));
-        setCards(cardsWithIds);
-        // Refresh decks
-        fetchDecks();
-      }
+      fetchDecks();
     } catch (error) {
       console.error("Error generating cards:", error);
       alert(`Failed to generate flashcards: ${error.message || 'Please try again.'}`);
@@ -151,9 +191,13 @@ export default function Flashcards() {
   const markAsMastered = async (cardId: string, mastered: boolean) => {
     try {
       await updateDoc(doc(db, COLLECTIONS.FLASHCARDS, cardId), { mastered: !mastered });
-      setCards(prev => prev.map(card => 
+      const updatedCards = cards.map(card =>
         card.id === cardId ? { ...card, mastered: !mastered } : card
-      ));
+      );
+      setCards(updatedCards);
+      if (currentDeckId) {
+        await syncDeckCards(currentDeckId, updatedCards);
+      }
       fetchDecks(); // Update deck mastery
     } catch (error) {
       console.error('Error updating card:', error);
@@ -164,7 +208,11 @@ export default function Flashcards() {
     if (!window.confirm('Are you sure you want to delete this flashcard?')) return;
     try {
       await deleteDoc(doc(db, COLLECTIONS.FLASHCARDS, cardId));
-      setCards(prev => prev.filter(card => card.id !== cardId));
+      const updatedCards = cards.filter(card => card.id !== cardId);
+      setCards(updatedCards);
+      if (currentDeckId) {
+        await syncDeckCards(currentDeckId, updatedCards);
+      }
       if (cards.length === 1) {
         setShowPractice(false);
       } else if (currentIndex >= cards.length - 1) {
@@ -189,9 +237,13 @@ export default function Flashcards() {
           question: editFront, 
           answer: editBack 
         });
-        setCards(prev => prev.map(card => 
+        const updatedCards = cards.map(card => 
           card.id === editingCard ? { ...card, front: editFront, back: editBack } : card
-        ));
+        );
+        setCards(updatedCards);
+        if (currentDeckId) {
+          await syncDeckCards(currentDeckId, updatedCards);
+        }
         setEditingCard(null);
       } catch (error) {
         console.error('Error updating card:', error);
@@ -238,6 +290,15 @@ export default function Flashcards() {
     });
     
     doc.save("flashcards.pdf");
+  };
+
+  const openDeck = (deck: Deck) => {
+    setCards(deck.cards);
+    setCurrentDeckId(deck.id);
+    setShowPractice(true);
+    setCurrentIndex(0);
+    setIsFlipped(false);
+    setEditingCard(null);
   };
 
   return (
@@ -293,7 +354,11 @@ export default function Flashcards() {
                 const masteredCards = deck.cards.filter(c => c.mastered).length;
                 const masteryPercentage = totalCards > 0 ? Math.round((masteredCards / totalCards) * 100) : 0;
                 return (
-                  <div key={deck.id} className="bg-[#0d1425] border border-slate-800 p-6 rounded-2xl hover:border-indigo-500/50 transition-all cursor-pointer group">
+                  <div
+                    key={deck.id}
+                    onClick={() => openDeck(deck)}
+                    className="bg-[#0d1425] border border-slate-800 p-6 rounded-2xl hover:border-indigo-500/50 transition-all cursor-pointer group"
+                  >
                     <div className="flex justify-between items-start mb-6">
                       <div className="bg-indigo-600/10 p-3 rounded-xl group-hover:bg-indigo-600/20 transition-colors">
                         <Layers className="w-6 h-6 text-indigo-500" />
