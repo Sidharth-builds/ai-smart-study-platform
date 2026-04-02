@@ -326,16 +326,22 @@ export default function Flashcards() {
             <span className="text-slate-500 font-bold">Card {currentIndex + 1} of {cards.length}</span>
           </div>
 
-          <div 
-            className="perspective-1000 cursor-pointer h-[400px]"
+          <div
+            className={`cursor-pointer h-[400px] ${isFlipped ? 'flipped' : ''}`}
             onClick={() => setIsFlipped(!isFlipped)}
+            style={{ perspective: '1000px' }}
           >
             <motion.div 
-              className="relative w-full h-full transition-all duration-500 preserve-3d"
+              className="relative w-full h-full"
               animate={{ rotateY: isFlipped ? 180 : 0 }}
+              transition={{ duration: 0.6 }}
+              style={{ transformStyle: 'preserve-3d' }}
             >
               {/* Front */}
-              <div className="absolute inset-0 w-full h-full bg-[#0d1425] border-2 border-slate-800 rounded-3xl p-12 flex flex-col items-center justify-center text-center backface-hidden shadow-2xl">
+              <div
+                className="absolute inset-0 w-full h-full bg-[#0d1425] border-2 border-slate-800 rounded-3xl p-12 flex flex-col items-center justify-center text-center shadow-2xl"
+                style={{ backfaceVisibility: 'hidden', WebkitBackfaceVisibility: 'hidden' }}
+              >
                 <p className="text-indigo-400 text-xs font-bold uppercase tracking-widest mb-4">Question</p>
                 {editingCard === cards[currentIndex].id ? (
                   <textarea
@@ -353,7 +359,14 @@ export default function Flashcards() {
               </div>
 
               {/* Back */}
-              <div className="absolute inset-0 w-full h-full bg-indigo-600 border-2 border-indigo-500 rounded-3xl p-12 flex flex-col items-center justify-center text-center backface-hidden rotate-y-180 shadow-2xl">
+              <div
+                className="absolute inset-0 w-full h-full bg-indigo-600 border-2 border-indigo-500 rounded-3xl p-12 flex flex-col items-center justify-center text-center shadow-2xl"
+                style={{
+                  backfaceVisibility: 'hidden',
+                  WebkitBackfaceVisibility: 'hidden',
+                  transform: 'rotateY(180deg)',
+                }}
+              >
                 <p className="text-white/60 text-xs font-bold uppercase tracking-widest mb-4">Answer</p>
                 {editingCard === cards[currentIndex].id ? (
                   <textarea
