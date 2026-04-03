@@ -27,13 +27,46 @@ export default function PapersAnalyzer() {
   const [result, setResult] = useState<AnalysisResult | null>(null);
 
   const extractTextFromPdf = async (file: File): Promise<string> => {
-    const arrayBuffer = await file.arrayBuffer();
-    const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+    if (!pdfjsLib.GlobalWorkerOptions.workerSrc) {
+      throw new Error("PDF worker not loaded");
+    }
+
+    console.log("[PapersAnalyzer] Reading file:", file.name, file.type, file.size);
+
+    let arrayBuffer: ArrayBuffer;
+    try {
+      arrayBuffer = await file.arrayBuffer();
+    } catch (err) {
+      console.error("[PapersAnalyzer] Failed to read file arrayBuffer:", err);
+      throw new Error("Failed to read file");
+    }
+
+    let pdf: any;
+    try {
+      pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+    } catch (err) {
+      console.error("[PapersAnalyzer] PDF parsing failed:", err);
+      throw new Error("PDF parsing failed");
+    }
 
     let text = "";
     for (let i = 1; i <= pdf.numPages; i++) {
-      const page = await pdf.getPage(i);
-      const content = await page.getTextContent();
+      let page: any;
+      try {
+        page = await pdf.getPage(i);
+      } catch (err) {
+        console.error(`[PapersAnalyzer] Failed to load page ${i}:`, err);
+        throw new Error("PDF parsing failed");
+      }
+
+      let content: any;
+      try {
+        content = await page.getTextContent();
+      } catch (err) {
+        console.error(`[PapersAnalyzer] Failed to extract text from page ${i}:`, err);
+        throw new Error("PDF parsing failed");
+      }
+
       const pageText = content.items.map((item: any) => item.str).join(" ");
       text += pageText + "\n";
     }
@@ -55,18 +88,22 @@ export default function PapersAnalyzer() {
 
     try {
       let combinedText = "";
+      console.log("[PapersAnalyzer] Starting analysis for", files.length, "files");
 
       for (const file of files) {
         setStatus(`Extracting text from ${file.name}...`);
+        console.log("[PapersAnalyzer] Extracting text from file:", file.name);
         const pdfText = await extractTextFromPdf(file);
         combinedText += pdfText + "\n";
       }
 
       if (inputText.trim()) {
+        console.log("[PapersAnalyzer] Appending manual study material");
         combinedText += "\n" + inputText.trim();
       }
 
       if (pyqs.trim()) {
+        console.log("[PapersAnalyzer] Appending PYQs");
         combinedText += "\n" + pyqs.trim();
       }
 
@@ -75,6 +112,7 @@ export default function PapersAnalyzer() {
       }
 
       setStatus("Generating predicted questions...");
+      console.log("[PapersAnalyzer] Sending combined text to Gemini (length:", combinedText.length, ")");
       const data = await analyzePreviousPaper(combinedText, pyqs);
 
       if (
@@ -93,7 +131,20 @@ export default function PapersAnalyzer() {
       setStatus(null);
     } catch (err: any) {
       console.error("Analysis error:", err);
-      setError(err.message || "An unexpected error occurred during analysis.");
+      const msg = String(err?.message || "");
+      if (msg.includes("PDF worker not loaded")) {
+        setError("PDF worker not loaded");
+      } else if (msg.includes("Failed to read file")) {
+        setError("Failed to read file");
+      } else if (msg.includes("PDF parsing failed")) {
+        setError("PDF parsing failed");
+      } else if (msg.includes("invalid JSON") || msg.includes("invalid json")) {
+        setError("Invalid JSON response");
+      } else if (msg.includes("Gemini")) {
+        setError("Gemini API error");
+      } else {
+        setError(msg || "An unexpected error occurred during analysis.");
+      }
       setStatus(null);
     } finally {
       setLoading(false);

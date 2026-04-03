@@ -77,6 +77,6 @@ It helps students:
 
 ## 🚀 Deployment
 
-This project will be deployed using:
+This project is deployed using:
 
 - Vercel 
