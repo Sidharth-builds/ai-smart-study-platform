@@ -1,7 +1,11 @@
-import React, { useState } from 'react';
-import { History, FileUp, Sparkles, Target, AlertCircle, ChevronRight } from 'lucide-react';
-import { analyzePreviousPaper } from '../lib/gemini';
-import { motion, AnimatePresence } from 'motion/react';
+import React, { useState } from "react";
+import { History, FileUp, Sparkles, Target, AlertCircle, ChevronRight } from "lucide-react";
+import { analyzePreviousPaper } from "../lib/gemini";
+import { motion, AnimatePresence } from "motion/react";
+import * as pdfjsLib from "pdfjs-dist";
+
+pdfjsLib.GlobalWorkerOptions.workerSrc =
+  `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
 
 interface AnalysisResult {
   important_topics: { name: string; frequency: number; importance: "High" | "Medium" | "Low" }[];
@@ -14,55 +18,65 @@ interface AnalysisResult {
 }
 
 export default function PapersAnalyzer() {
-  const [inputText, setInputText] = useState('');
-  const [pyqs, setPyqs] = useState('');
-  const [file, setFile] = useState<File | null>(null);
+  const [inputText, setInputText] = useState("");
+  const [pyqs, setPyqs] = useState("");
+  const [files, setFiles] = useState<File[]>([]);
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<AnalysisResult | null>(null);
 
+  const extractTextFromPdf = async (file: File): Promise<string> => {
+    const arrayBuffer = await file.arrayBuffer();
+    const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+
+    let text = "";
+    for (let i = 1; i <= pdf.numPages; i++) {
+      const page = await pdf.getPage(i);
+      const content = await page.getTextContent();
+      const pageText = content.items.map((item: any) => item.str).join(" ");
+      text += pageText + "\n";
+    }
+    return text;
+  };
+
   const handleAnalyze = async () => {
-    if (!inputText && !file) return;
     setLoading(true);
     setError(null);
-    setStatus("Initializing analysis...");
-    
+    setStatus("Preparing analysis...");
+    setResult(null);
+
+    if (files.length === 0) {
+      setError("Please select at least one PDF file.");
+      setLoading(false);
+      setStatus(null);
+      return;
+    }
+
     try {
-      let textToAnalyze = inputText;
+      let combinedText = "";
 
-      if (file) {
-        setStatus(`Uploading and extracting text from ${file.name}...`);
-        const formData = new FormData();
-        formData.append('file', file);
-        
-        const uploadRes = await fetch('/api/upload-paper', {
-          method: 'POST',
-          body: formData,
-        });
-        
-        if (!uploadRes.ok) {
-          const errorData = await uploadRes.json().catch(() => ({}));
-          throw new Error(errorData.error || `Upload failed: ${uploadRes.statusText}`);
-        }
-        
-        const uploadData = await uploadRes.json();
-        if (uploadData.success) {
-          textToAnalyze = uploadData.text;
-          setStatus("Text extracted successfully. Starting AI analysis...");
-        } else {
-          throw new Error(uploadData.error || "Failed to extract text from file");
-        }
-      } else {
-        setStatus("Analyzing pasted text with AI...");
+      for (const file of files) {
+        setStatus(`Extracting text from ${file.name}...`);
+        const pdfText = await extractTextFromPdf(file);
+        combinedText += pdfText + "\n";
       }
 
-      if (!textToAnalyze || textToAnalyze.trim().length < 10) {
-        throw new Error("Please provide more content to analyze (at least 10 characters).");
+      if (inputText.trim()) {
+        combinedText += "\n" + inputText.trim();
       }
 
-      const data = await analyzePreviousPaper(textToAnalyze, pyqs);
-      
+      if (pyqs.trim()) {
+        combinedText += "\n" + pyqs.trim();
+      }
+
+      if (!combinedText.trim()) {
+        throw new Error("No text could be extracted from the PDFs.");
+      }
+
+      setStatus("Generating predicted questions...");
+      const data = await analyzePreviousPaper(combinedText, pyqs);
+
       if (
         !data ||
         (
@@ -72,9 +86,9 @@ export default function PapersAnalyzer() {
           data.predicted_questions.conceptual.length === 0
         )
       ) {
-        throw new Error("AI was unable to extract meaningful data from this paper. Please try with clearer content.");
+        throw new Error("AI was unable to extract meaningful data from these papers.");
       }
-      
+
       setResult(data);
       setStatus(null);
     } catch (err: any) {
@@ -102,9 +116,9 @@ export default function PapersAnalyzer() {
               <FileUp className="w-5 h-5 text-indigo-500" />
               Analyze New Paper
             </h3>
-            
+
             <div className="space-y-4 mb-4">
-              <textarea 
+              <textarea
                 value={inputText}
                 onChange={(e) => setInputText(e.target.value)}
                 placeholder="Paste study material or the content of a previous year paper here..."
@@ -122,24 +136,25 @@ export default function PapersAnalyzer() {
                   className="w-full h-[120px] bg-slate-900 border border-slate-800 rounded-xl p-4 text-white placeholder:text-slate-600 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 resize-none"
                 />
               </div>
-              
+
               <div className="flex items-center gap-4 p-4 bg-slate-900/50 border border-slate-800 border-dashed rounded-xl">
                 <FileUp className="w-6 h-6 text-slate-500" />
                 <div className="flex-1">
-                  <p className="text-sm text-slate-400 mb-1">Or upload a PDF/Text file</p>
-                  <input 
-                    type="file" 
-                    accept=".pdf,.txt"
+                  <p className="text-sm text-slate-400 mb-1">Upload multiple PDF files</p>
+                  <input
+                    type="file"
+                    accept=".pdf"
+                    multiple
                     onChange={(e) => {
-                      setFile(e.target.files?.[0] || null);
+                      setFiles(Array.from(e.target.files || []));
                       setError(null);
                     }}
                     className="block w-full text-xs text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-bold file:bg-indigo-600/10 file:text-indigo-400 hover:file:bg-indigo-600/20 cursor-pointer"
                   />
                 </div>
-                {file && (
+                {files.length > 0 && (
                   <div className="px-3 py-1 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded-full text-xs font-bold">
-                    File selected
+                    {files.length} files selected
                   </div>
                 )}
               </div>
@@ -159,9 +174,9 @@ export default function PapersAnalyzer() {
               </div>
             )}
 
-            <button 
+            <button
               onClick={handleAnalyze}
-              disabled={loading || (!inputText && !file)}
+              disabled={loading}
               className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-bold py-3 rounded-xl flex items-center justify-center gap-2 transition-all shadow-lg shadow-indigo-600/20"
             >
               {loading ? (
@@ -177,7 +192,7 @@ export default function PapersAnalyzer() {
 
           <AnimatePresence>
             {result && (
-              <motion.div 
+              <motion.div
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 className="bg-[#0d1425] border border-slate-800 rounded-2xl overflow-hidden"
@@ -274,7 +289,9 @@ export default function PapersAnalyzer() {
                 <History className="w-8 h-8 text-slate-700" />
               </div>
               <h3 className="text-white font-bold mb-2">No Analysis Yet</h3>
-              <p className="text-slate-500 text-sm">Paste study material and optional PYQs to generate exam-aligned predicted questions.</p>
+              <p className="text-slate-500 text-sm">
+                Upload PDFs and optional PYQs to generate exam-aligned predicted questions.
+              </p>
             </div>
           )}
 
@@ -285,9 +302,9 @@ export default function PapersAnalyzer() {
             </h3>
             <ul className="space-y-3">
               {[
-                'Paste core study material before generating predictions',
-                'Add previous year questions to improve exam pattern matching',
-                'Include marks or difficulty hints when available',
+                "Upload multiple years of papers for better trend detection",
+                "Add previous year questions to improve exam pattern matching",
+                "Include marks or difficulty hints when available",
               ].map((tip, i) => (
                 <li key={i} className="flex gap-2 text-xs text-slate-400">
                   <ChevronRight className="w-4 h-4 text-indigo-500 shrink-0" />
