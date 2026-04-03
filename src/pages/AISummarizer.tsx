@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { FileText, Sparkles, Upload, Copy, Save, CheckCircle2 } from 'lucide-react';
-import { generateStudyContent } from '../lib/gemini';
+import { generateStudyContent, summarizeYouTubeVideo } from '../lib/gemini';
 import { db } from '../lib/firebase';
 import { collection, addDoc, Timestamp } from 'firebase/firestore';
 import { useAuth } from '../lib/AuthContext';
@@ -11,6 +11,26 @@ interface SummaryResult {
   bulletPoints: string[];
   keyConcepts: string[];
 }
+
+const isYouTubeLink = (input: string): boolean => {
+  return input.includes('youtube.com') || input.includes('youtu.be');
+};
+
+const summarize = async (input: string): Promise<SummaryResult> => {
+  const content = input.slice(0, 5000);
+
+  if (isYouTubeLink(input)) {
+    const videoSummary = await summarizeYouTubeVideo(content);
+
+    return {
+      summary: videoSummary.summary,
+      bulletPoints: videoSummary.keyPoints,
+      keyConcepts: videoSummary.examTopics,
+    };
+  }
+
+  return generateStudyContent(content);
+};
 
 export default function AISummarizer() {
   const [text, setText] = useState('');
@@ -25,7 +45,7 @@ export default function AISummarizer() {
     setLoading(true);
     setSaved(false);
     try {
-      const data = await generateStudyContent(text);
+      const data = await summarize(text);
       setResult(data);
     } catch (error) {
       console.error(error);
@@ -81,11 +101,11 @@ export default function AISummarizer() {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
         <div className="space-y-4">
           <div className="bg-[#0d1425] border border-slate-800 rounded-2xl p-6">
-            <label className="block text-sm font-medium text-slate-400 mb-4">Paste your text here</label>
+            <label className="block text-sm font-medium text-slate-400 mb-4">Paste your text, PDF, or YouTube link</label>
             <textarea 
               value={text}
               onChange={(e) => setText(e.target.value)}
-              placeholder="Paste the content of a chapter, article, or lecture notes..."
+              placeholder="Paste text, PDF, or YouTube link"
               className="w-full h-[400px] bg-slate-900 border border-slate-800 rounded-xl p-4 text-white placeholder:text-slate-600 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 resize-none"
             />
             <div className="mt-4 flex gap-3">
