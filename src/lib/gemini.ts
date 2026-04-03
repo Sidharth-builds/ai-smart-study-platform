@@ -6,6 +6,8 @@ type StudyContent = {
   keyConcepts: string[];
 };
 
+export type SummaryMode = "normal" | "points" | "exam" | "detailed" | "smart";
+
 type Flashcard = {
   front: string;
   back: string;
@@ -107,10 +109,10 @@ const generateJson = async <T>(prompt: string): Promise<T> => {
   }
 };
 
-export const generateStudyContent = async (text: string): Promise<StudyContent> => {
-  try {
-    return await generateJson<StudyContent>(`
-Analyze the following study material and respond with valid JSON only.
+const getSummaryPrompt = (text: string, mode: SummaryMode): string => {
+  switch (mode) {
+    case "points":
+      return `Summarize the following into clear bullet points and respond with valid JSON only.
 
 Return this exact shape:
 {
@@ -120,8 +122,52 @@ Return this exact shape:
 }
 
 Text:
-${text}
-`);
+${text}`;
+    case "exam":
+      return `Convert the following content into exam-ready notes with important points and definitions, and respond with valid JSON only.
+
+Return this exact shape:
+{
+  "summary": "string",
+  "bulletPoints": ["string"],
+  "keyConcepts": ["string"]
+}
+
+Text:
+${text}`;
+    case "detailed":
+      return `Explain the following content in a detailed and easy-to-understand way, and respond with valid JSON only.
+
+Return this exact shape:
+{
+  "summary": "string",
+  "bulletPoints": ["string"],
+  "keyConcepts": ["string"]
+}
+
+Text:
+${text}`;
+    default:
+      return `Provide a clear and concise summary of the following and respond with valid JSON only.
+
+Return this exact shape:
+{
+  "summary": "string",
+  "bulletPoints": ["string"],
+  "keyConcepts": ["string"]
+}
+
+Text:
+${text}`;
+  }
+};
+
+export const generateStudyContent = async (
+  text: string,
+  mode: SummaryMode = "normal",
+): Promise<StudyContent> => {
+  try {
+    return await generateJson<StudyContent>(getSummaryPrompt(text, mode));
   } catch (error) {
     console.error("Gemini Summarizer Error:", error);
     throw error;

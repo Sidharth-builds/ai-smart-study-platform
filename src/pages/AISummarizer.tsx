@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { FileText, Sparkles, Upload, Copy, Save, CheckCircle2 } from 'lucide-react';
-import { generateStudyContent, summarizeYouTubeVideo } from '../lib/gemini';
+import { generateStudyContent, summarizeYouTubeVideo, type SummaryMode } from '../lib/gemini';
 import { db } from '../lib/firebase';
 import { collection, addDoc, Timestamp } from 'firebase/firestore';
 import { useAuth } from '../lib/AuthContext';
@@ -16,8 +16,37 @@ const isYouTubeLink = (input: string): boolean => {
   return input.includes('youtube.com') || input.includes('youtu.be');
 };
 
-const summarize = async (input: string): Promise<SummaryResult> => {
+const detectSmartMode = (input: string): Exclude<SummaryMode, 'smart'> => {
+  if (input.length > 3000) {
+    return 'points';
+  }
+
+  const definitionPattern = /\b(is defined as|defined as|definition|refers to|means)\b/i;
+  if (definitionPattern.test(input)) {
+    return 'exam';
+  }
+
+  return 'normal';
+};
+
+const getPromptLabel = (mode: SummaryMode) => {
+  switch (mode) {
+    case 'smart':
+      return 'Smart Summary';
+    case 'points':
+      return 'Bullet Points';
+    case 'exam':
+      return 'Exam Notes';
+    case 'detailed':
+      return 'Detailed';
+    default:
+      return 'Normal';
+  }
+};
+
+const summarize = async (input: string, mode: SummaryMode): Promise<SummaryResult> => {
   const content = input.slice(0, 5000);
+  const resolvedMode = mode === 'smart' ? detectSmartMode(content) : mode;
 
   if (isYouTubeLink(input)) {
     const videoSummary = await summarizeYouTubeVideo(content);
@@ -29,11 +58,12 @@ const summarize = async (input: string): Promise<SummaryResult> => {
     };
   }
 
-  return generateStudyContent(content);
+  return generateStudyContent(content, resolvedMode);
 };
 
 export default function AISummarizer() {
   const [text, setText] = useState('');
+  const [mode, setMode] = useState<SummaryMode>('normal');
   const [result, setResult] = useState<SummaryResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -45,7 +75,7 @@ export default function AISummarizer() {
     setLoading(true);
     setSaved(false);
     try {
-      const data = await summarize(text);
+      const data = await summarize(text, mode);
       setResult(data);
     } catch (error) {
       console.error(error);
@@ -102,6 +132,20 @@ export default function AISummarizer() {
         <div className="space-y-4">
           <div className="bg-[#0d1425] border border-slate-800 rounded-2xl p-6">
             <label className="block text-sm font-medium text-slate-400 mb-4">Paste your text, PDF, or YouTube link</label>
+            <div className="mb-4">
+              <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Summary Mode</label>
+              <select
+                value={mode}
+                onChange={(e) => setMode(e.target.value as SummaryMode)}
+                className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/50"
+              >
+                <option value="smart">Auto Smart Mode</option>
+                <option value="normal">Normal</option>
+                <option value="points">Bullet Points</option>
+                <option value="exam">Exam Notes</option>
+                <option value="detailed">Detailed</option>
+              </select>
+            </div>
             <textarea 
               value={text}
               onChange={(e) => setText(e.target.value)}
@@ -123,7 +167,7 @@ export default function AISummarizer() {
                 ) : (
                   <Sparkles className="w-5 h-5" />
                 )}
-                Generate Summary
+                Generate {getPromptLabel(mode)}
               </button>
             </div>
           </div>
