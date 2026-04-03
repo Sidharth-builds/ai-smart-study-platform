@@ -31,6 +31,8 @@ export default function PapersAnalyzer() {
       throw new Error("PDF worker not loaded");
     }
 
+    console.log("[PapersAnalyzer] pdfjs version:", pdfjsLib.version);
+    console.log("[PapersAnalyzer] pdfjs worker:", pdfjsLib.GlobalWorkerOptions.workerSrc);
     console.log("[PapersAnalyzer] Reading file:", file.name, file.type, file.size);
 
     let arrayBuffer: ArrayBuffer;
@@ -39,6 +41,12 @@ export default function PapersAnalyzer() {
     } catch (err) {
       console.error("[PapersAnalyzer] Failed to read file arrayBuffer:", err);
       throw new Error("Failed to read file");
+    }
+
+    const header = new Uint8Array(arrayBuffer, 0, 4);
+    const isPdf = header[0] === 0x25 && header[1] === 0x50 && header[2] === 0x44 && header[3] === 0x46;
+    if (!isPdf) {
+      throw new Error("Invalid PDF or unsupported format");
     }
 
     let pdf: any;
@@ -136,6 +144,8 @@ export default function PapersAnalyzer() {
         setError("PDF worker not loaded");
       } else if (msg.includes("Failed to read file")) {
         setError("Failed to read file");
+      } else if (msg.includes("Invalid PDF")) {
+        setError("Invalid PDF or unsupported format");
       } else if (msg.includes("PDF parsing failed")) {
         setError("PDF parsing failed");
       } else if (msg.includes("invalid JSON") || msg.includes("invalid json")) {
@@ -197,7 +207,8 @@ export default function PapersAnalyzer() {
                     accept=".pdf"
                     multiple
                     onChange={(e) => {
-                      setFiles(Array.from(e.target.files || []));
+                      const selected = Array.from(e.target.files || []);
+                      setFiles((prev) => [...prev, ...selected]);
                       setError(null);
                     }}
                     className="block w-full text-xs text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-bold file:bg-indigo-600/10 file:text-indigo-400 hover:file:bg-indigo-600/20 cursor-pointer"
