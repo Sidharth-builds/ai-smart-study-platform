@@ -19,8 +19,9 @@ type GeneratedFlashcard = {
 };
 
 type PreviousPaperAnalysis = {
-  questions: string[];
-  topics: { name: string; frequency: string }[];
+  importantQuestions: string[];
+  longAnswerQuestions: string[];
+  trickyQuestions: string[];
   insights: string;
 };
 
@@ -252,20 +253,38 @@ ${filteredConcepts.map((concept, index) => `${index + 1}. ${concept}`).join("\n"
 
 export const analyzePreviousPaper = async (
   text: string,
+  pyqs = "",
 ): Promise<PreviousPaperAnalysis> => {
   try {
-    return await generateJson<PreviousPaperAnalysis>(`
-Analyze this previous year exam paper and respond with valid JSON only.
+    const content = text.slice(0, 4000);
+    const pyqContent = pyqs ? pyqs.slice(0, 1000) : "";
 
-Return this exact shape:
+    return await generateJson<PreviousPaperAnalysis>(`
+You are an expert exam paper setter.
+
+Study the material and previous year questions (if provided).
+
+Your task:
+Predict likely exam questions.
+
+Instructions:
+- Follow patterns from previous questions
+- Focus on important concepts
+- Maintain exam-level difficulty
+
+Study Material:
+${content}
+
+Previous Year Questions:
+${pyqContent}
+
+Respond with valid JSON only in this exact shape:
 {
-  "questions": ["string"],
-  "topics": [{ "name": "string", "frequency": "string" }],
+  "importantQuestions": ["string"],
+  "longAnswerQuestions": ["string"],
+  "trickyQuestions": ["string"],
   "insights": "string"
 }
-
-Paper Content:
-${text}
 `);
   } catch (error) {
     console.error("Gemini Paper Analysis Error:", error);

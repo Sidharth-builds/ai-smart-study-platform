@@ -1,16 +1,18 @@
 import React, { useState } from 'react';
-import { History, FileUp, Search, Download, Sparkles, Target, AlertCircle, ChevronRight } from 'lucide-react';
+import { History, FileUp, Sparkles, Target, AlertCircle, ChevronRight } from 'lucide-react';
 import { analyzePreviousPaper } from '../lib/gemini';
 import { motion, AnimatePresence } from 'motion/react';
 
 interface AnalysisResult {
-  questions: string[];
-  topics: { name: string; frequency: string }[];
+  importantQuestions: string[];
+  longAnswerQuestions: string[];
+  trickyQuestions: string[];
   insights: string;
 }
 
 export default function PapersAnalyzer() {
   const [inputText, setInputText] = useState('');
+  const [pyqs, setPyqs] = useState('');
   const [file, setFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
@@ -56,12 +58,16 @@ export default function PapersAnalyzer() {
         throw new Error("Please provide more content to analyze (at least 10 characters).");
       }
 
-      // Limit text size for Gemini
-      const truncatedText = textToAnalyze.slice(0, 25000);
-
-      const data = await analyzePreviousPaper(truncatedText);
+      const data = await analyzePreviousPaper(textToAnalyze, pyqs);
       
-      if (!data || (data.questions.length === 0 && data.topics.length === 0)) {
+      if (
+        !data ||
+        (
+          data.importantQuestions.length === 0 &&
+          data.longAnswerQuestions.length === 0 &&
+          data.trickyQuestions.length === 0
+        )
+      ) {
         throw new Error("AI was unable to extract meaningful data from this paper. Please try with clearer content.");
       }
       
@@ -97,9 +103,21 @@ export default function PapersAnalyzer() {
               <textarea 
                 value={inputText}
                 onChange={(e) => setInputText(e.target.value)}
-                placeholder="Paste the content of a previous year paper or exam questions here..."
+                placeholder="Paste study material or the content of a previous year paper here..."
                 className="w-full h-[150px] bg-slate-900 border border-slate-800 rounded-xl p-4 text-white placeholder:text-slate-600 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 resize-none"
               />
+
+              <div>
+                <label className="block text-sm font-medium text-slate-400 mb-3">
+                  Paste Previous Year Questions (optional)
+                </label>
+                <textarea
+                  value={pyqs}
+                  onChange={(e) => setPyqs(e.target.value)}
+                  placeholder="Paste PYQs here to align predictions with exam trends..."
+                  className="w-full h-[120px] bg-slate-900 border border-slate-800 rounded-xl p-4 text-white placeholder:text-slate-600 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 resize-none"
+                />
+              </div>
               
               <div className="flex items-center gap-4 p-4 bg-slate-900/50 border border-slate-800 border-dashed rounded-xl">
                 <FileUp className="w-6 h-6 text-slate-500" />
@@ -147,7 +165,7 @@ export default function PapersAnalyzer() {
               ) : (
                 <>
                   <Sparkles className="w-5 h-5" />
-                  Analyze Paper Trends
+                  Generate Predicted Questions
                 </>
               )}
             </button>
@@ -161,10 +179,10 @@ export default function PapersAnalyzer() {
                 className="bg-[#0d1425] border border-slate-800 rounded-2xl overflow-hidden"
               >
                 <div className="p-6 border-b border-slate-800">
-                  <h3 className="text-lg font-bold text-white">Extracted Questions</h3>
+                  <h3 className="text-lg font-bold text-white">Predicted Important Questions</h3>
                 </div>
                 <div className="p-6 space-y-4">
-                  {result.questions.map((q, i) => (
+                  {result.importantQuestions.map((q, i) => (
                     <div key={i} className="p-4 bg-slate-900/50 border border-slate-800 rounded-xl flex gap-4">
                       <span className="w-6 h-6 bg-indigo-600/20 text-indigo-400 rounded-lg flex items-center justify-center text-xs font-bold shrink-0">
                         {i + 1}
@@ -194,21 +212,26 @@ export default function PapersAnalyzer() {
               <div className="bg-[#0d1425] border border-slate-800 p-6 rounded-2xl">
                 <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
                   <Target className="w-5 h-5 text-emerald-500" />
-                  Topic Frequency
+                  Long Answer Questions
                 </h3>
                 <div className="space-y-4">
-                  {result.topics.map((topic, i) => (
-                    <div key={i} className="space-y-1.5">
-                      <div className="flex justify-between text-xs font-medium">
-                        <span className="text-slate-400">{topic.name}</span>
-                        <span className="text-emerald-500 font-bold">{topic.frequency}</span>
-                      </div>
-                      <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
-                        <div 
-                          className="h-full bg-emerald-500" 
-                          style={{ width: topic.frequency.includes('%') ? topic.frequency : '50%' }} 
-                        />
-                      </div>
+                  {result.longAnswerQuestions.map((question, i) => (
+                    <div key={i} className="p-4 bg-slate-900/50 border border-slate-800 rounded-xl">
+                      <p className="text-slate-300 text-sm leading-relaxed">{question}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="bg-[#0d1425] border border-slate-800 p-6 rounded-2xl">
+                <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
+                  <AlertCircle className="w-5 h-5 text-amber-500" />
+                  Conceptual / Tricky Questions
+                </h3>
+                <div className="space-y-4">
+                  {result.trickyQuestions.map((question, i) => (
+                    <div key={i} className="p-4 bg-slate-900/50 border border-slate-800 rounded-xl">
+                      <p className="text-slate-300 text-sm leading-relaxed">{question}</p>
                     </div>
                   ))}
                 </div>
@@ -220,7 +243,7 @@ export default function PapersAnalyzer() {
                 <History className="w-8 h-8 text-slate-700" />
               </div>
               <h3 className="text-white font-bold mb-2">No Analysis Yet</h3>
-              <p className="text-slate-500 text-sm">Upload or paste a paper to see AI-driven topic trends and insights.</p>
+              <p className="text-slate-500 text-sm">Paste study material and optional PYQs to generate exam-aligned predicted questions.</p>
             </div>
           )}
 
@@ -231,9 +254,9 @@ export default function PapersAnalyzer() {
             </h3>
             <ul className="space-y-3">
               {[
-                'Paste full questions for better accuracy',
-                'Include marks/weightage if available',
-                'Analyze multiple years for trend detection',
+                'Paste core study material before generating predictions',
+                'Add previous year questions to improve exam pattern matching',
+                'Include marks or difficulty hints when available',
               ].map((tip, i) => (
                 <li key={i} className="flex gap-2 text-xs text-slate-400">
                   <ChevronRight className="w-4 h-4 text-indigo-500 shrink-0" />
