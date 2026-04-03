@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from "motion/react";
 import * as pdfjsLib from "pdfjs-dist";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc =
-  `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
+  `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
 
 interface AnalysisResult {
   important_topics: { name: string; frequency: number; importance: "High" | "Medium" | "Low" }[];
@@ -53,8 +53,16 @@ export default function PapersAnalyzer() {
     try {
       pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
     } catch (err) {
-      console.error("[PapersAnalyzer] PDF parsing failed:", err);
-      throw new Error("PDF parsing failed");
+      console.error("PDFJS ERROR:", err);
+      // Optional fallback to local worker if CDN fails
+      pdfjsLib.GlobalWorkerOptions.workerSrc =
+        new URL("pdfjs-dist/build/pdf.worker.min.mjs", import.meta.url).toString();
+      try {
+        pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+      } catch (retryErr) {
+        console.error("PDFJS ERROR (local worker):", retryErr);
+        throw new Error("PDF parsing failed - worker issue or invalid PDF");
+      }
     }
 
     let text = "";
