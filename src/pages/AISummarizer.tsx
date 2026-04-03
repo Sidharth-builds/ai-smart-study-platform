@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { FileText, Sparkles, Upload, Copy, Save, CheckCircle2 } from 'lucide-react';
-import { generateStudyContent, summarizeYouTubeVideo, type SummaryMode } from '../lib/gemini';
+import { generateStudyContent, type SummaryMode } from '../lib/gemini';
 import { db } from '../lib/firebase';
 import { collection, addDoc, Timestamp } from 'firebase/firestore';
 import { useAuth } from '../lib/AuthContext';
@@ -14,6 +14,38 @@ interface SummaryResult {
 
 const isYouTubeLink = (input: string): boolean => {
   return input.includes('youtube.com') || input.includes('youtu.be');
+};
+
+const extractVideoId = (url: string): string => {
+  const match = url.match(/(?:v=|youtu\.be\/)([^&?/]+)/);
+  return match ? match[1] : '';
+};
+
+const getYouTubeTranscript = async (videoId: string): Promise<string> => {
+  if (!videoId) {
+    return 'Unable to fetch transcript. Please try another video.';
+  }
+
+  try {
+    const res = await fetch(`https://youtube-transcript-api.vercel.app/api?videoId=${videoId}`);
+    if (!res.ok) {
+      return 'Unable to fetch transcript. Please try another video.';
+    }
+
+    const data = await res.json() as { transcript?: Array<{ text?: string }> };
+    const transcript = Array.isArray(data.transcript)
+      ? data.transcript.map((item) => item.text ?? '').join(' ').trim()
+      : '';
+
+    if (!transcript) {
+      return 'Unable to fetch transcript. Please try another video.';
+    }
+
+    return transcript;
+  } catch (error) {
+    console.error('Transcript fetch failed:', error);
+    return 'Unable to fetch transcript. Please try another video.';
+  }
 };
 
 const detectSmartMode = (input: string): Exclude<SummaryMode, 'smart'> => {
@@ -45,18 +77,15 @@ const getPromptLabel = (mode: SummaryMode) => {
 };
 
 const summarize = async (input: string, mode: SummaryMode): Promise<SummaryResult> => {
-  const content = input.slice(0, 5000);
-  const resolvedMode = mode === 'smart' ? detectSmartMode(content) : mode;
+  let content = input;
 
   if (isYouTubeLink(input)) {
-    const videoSummary = await summarizeYouTubeVideo(content);
-
-    return {
-      summary: videoSummary.summary,
-      bulletPoints: videoSummary.keyPoints,
-      keyConcepts: videoSummary.examTopics,
-    };
+    const videoId = extractVideoId(input);
+    content = await getYouTubeTranscript(videoId);
   }
+
+  content = content.slice(0, 5000);
+  const resolvedMode = mode === 'smart' ? detectSmartMode(content) : mode;
 
   return generateStudyContent(content, resolvedMode);
 };
@@ -131,7 +160,7 @@ export default function AISummarizer() {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
         <div className="space-y-4">
           <div className="bg-[#0d1425] border border-slate-800 rounded-2xl p-6">
-            <label className="block text-sm font-medium text-slate-400 mb-4">Paste your text, PDF, or YouTube link</label>
+            <label className="block text-sm font-medium text-slate-400 mb-4">Paste your text, upload PDF, or paste YouTube link</label>
             <div className="mb-4">
               <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Summary Mode</label>
               <select
@@ -149,7 +178,7 @@ export default function AISummarizer() {
             <textarea 
               value={text}
               onChange={(e) => setText(e.target.value)}
-              placeholder="Paste text, PDF, or YouTube link"
+              placeholder="Paste text, upload PDF, or paste YouTube link"
               className="w-full h-[400px] bg-slate-900 border border-slate-800 rounded-xl p-4 text-white placeholder:text-slate-600 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 resize-none"
             />
             <div className="mt-4 flex gap-3">

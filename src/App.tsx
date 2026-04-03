@@ -8,7 +8,6 @@ import Dashboard from './pages/Dashboard';
 import StudyRooms from './pages/StudyRooms';
 import Flashcards from './pages/Flashcards';
 import AISummarizer from './pages/AISummarizer';
-import YouTubeSummarizer from './pages/YouTubeSummarizer';
 import PapersAnalyzer from './pages/PapersAnalyzer';
 import Predictions from './pages/Predictions';
 import StudyPlanner from './pages/StudyPlanner';
@@ -40,7 +39,7 @@ export default function App() {
               <Route path="/rooms/:roomId" element={<RoomDetail />} />
               <Route path="/flashcards" element={<Flashcards />} />
               <Route path="/summarizer" element={<AISummarizer />} />
-              <Route path="/youtube" element={<YouTubeSummarizer />} />
+              <Route path="/youtube" element={<Navigate to="/summarizer" replace />} />
               <Route path="/analyzer" element={<PapersAnalyzer />} />
               <Route path="/predictions" element={<Predictions />} />
               <Route path="/planner" element={<StudyPlanner />} />
