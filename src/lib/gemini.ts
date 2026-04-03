@@ -19,10 +19,13 @@ type GeneratedFlashcard = {
 };
 
 type PreviousPaperAnalysis = {
-  importantQuestions: string[];
-  longAnswerQuestions: string[];
-  trickyQuestions: string[];
-  insights: string;
+  important_topics: { name: string; frequency: number; importance: "High" | "Medium" | "Low" }[];
+  recurring_concepts: string[];
+  predicted_questions: {
+    short: string[];
+    long: string[];
+    conceptual: string[];
+  };
 };
 
 type YouTubeSummary = {
@@ -260,31 +263,63 @@ export const analyzePreviousPaper = async (
     const pyqContent = pyqs ? pyqs.slice(0, 1000) : "";
 
     return await generateJson<PreviousPaperAnalysis>(`
-You are an expert exam paper setter.
+You are an expert AI system that analyzes multiple previous year question papers and predicts future exam questions.
 
-Study the material and previous year questions (if provided).
+You will be given combined text from multiple exam papers.
 
-Your task:
-Predict likely exam questions.
+Your tasks:
 
-Instructions:
-- Follow patterns from previous questions
-- Focus on important concepts
-- Maintain exam-level difficulty
+1. Identify important topics:
+- Extract key topics from all questions
+- Group similar questions under one topic
+
+2. Detect recurring questions:
+- Find questions or concepts repeated across papers
+- Highlight them as HIGH importance
+
+3. Analyze patterns:
+- Identify common question types:
+  (e.g., explain, define, compare, applications)
+
+4. Predict exam questions:
+- Generate:
+  • 5 short answer questions
+  • 3 long answer questions
+  • 2 conceptual questions
+- Questions must be realistic and exam-oriented
+
+5. STRICT OUTPUT FORMAT (JSON ONLY):
+
+{
+  "important_topics": [
+    { "name": "Decision Trees", "frequency": 3, "importance": "High" }
+  ],
+  "recurring_concepts": [
+    "Decision Trees are repeatedly asked in multiple years"
+  ],
+  "predicted_questions": {
+    "short": [
+      "Define Decision Tree"
+    ],
+    "long": [
+      "Explain Decision Tree algorithm with example"
+    ],
+    "conceptual": [
+      "Compare Decision Trees with other classification models"
+    ]
+  }
+}
+
+Important:
+- Do NOT add extra text
+- Do NOT explain anything
+- Only return valid JSON
 
 Study Material:
 ${content}
 
 Previous Year Questions:
 ${pyqContent}
-
-Respond with valid JSON only in this exact shape:
-{
-  "importantQuestions": ["string"],
-  "longAnswerQuestions": ["string"],
-  "trickyQuestions": ["string"],
-  "insights": "string"
-}
 `);
   } catch (error) {
     console.error("Gemini Paper Analysis Error:", error);

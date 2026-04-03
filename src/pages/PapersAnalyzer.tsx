@@ -4,10 +4,13 @@ import { analyzePreviousPaper } from '../lib/gemini';
 import { motion, AnimatePresence } from 'motion/react';
 
 interface AnalysisResult {
-  importantQuestions: string[];
-  longAnswerQuestions: string[];
-  trickyQuestions: string[];
-  insights: string;
+  important_topics: { name: string; frequency: number; importance: "High" | "Medium" | "Low" }[];
+  recurring_concepts: string[];
+  predicted_questions: {
+    short: string[];
+    long: string[];
+    conceptual: string[];
+  };
 }
 
 export default function PapersAnalyzer() {
@@ -63,9 +66,10 @@ export default function PapersAnalyzer() {
       if (
         !data ||
         (
-          data.importantQuestions.length === 0 &&
-          data.longAnswerQuestions.length === 0 &&
-          data.trickyQuestions.length === 0
+          data.important_topics.length === 0 &&
+          data.predicted_questions.short.length === 0 &&
+          data.predicted_questions.long.length === 0 &&
+          data.predicted_questions.conceptual.length === 0
         )
       ) {
         throw new Error("AI was unable to extract meaningful data from this paper. Please try with clearer content.");
@@ -179,15 +183,20 @@ export default function PapersAnalyzer() {
                 className="bg-[#0d1425] border border-slate-800 rounded-2xl overflow-hidden"
               >
                 <div className="p-6 border-b border-slate-800">
-                  <h3 className="text-lg font-bold text-white">Predicted Important Questions</h3>
+                  <h3 className="text-lg font-bold text-white">Important Topics</h3>
                 </div>
                 <div className="p-6 space-y-4">
-                  {result.importantQuestions.map((q, i) => (
+                  {result.important_topics.map((topic, i) => (
                     <div key={i} className="p-4 bg-slate-900/50 border border-slate-800 rounded-xl flex gap-4">
                       <span className="w-6 h-6 bg-indigo-600/20 text-indigo-400 rounded-lg flex items-center justify-center text-xs font-bold shrink-0">
                         {i + 1}
                       </span>
-                      <p className="text-slate-300 text-sm leading-relaxed">{q}</p>
+                      <div className="flex-1">
+                        <p className="text-slate-200 text-sm font-semibold">{topic.name}</p>
+                        <p className="text-slate-400 text-xs">
+                          Frequency: {topic.frequency} · Importance: {topic.importance}
+                        </p>
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -199,14 +208,36 @@ export default function PapersAnalyzer() {
         <div className="space-y-6">
           {result ? (
             <>
-              <div className="bg-indigo-600/10 border border-indigo-500/20 p-6 rounded-2xl">
-                <h3 className="text-lg font-bold text-indigo-400 mb-2 flex items-center gap-2">
-                  <Sparkles className="w-5 h-5" />
-                  AI Insights
+              <div className="bg-[#0d1425] border border-slate-800 p-6 rounded-2xl">
+                <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
+                  <AlertCircle className="w-5 h-5 text-amber-500" />
+                  Recurring Concepts
                 </h3>
-                <p className="text-slate-300 text-sm leading-relaxed">
-                  {result.insights}
-                </p>
+                <div className="space-y-4">
+                  {result.recurring_concepts.length > 0 ? (
+                    result.recurring_concepts.map((concept, i) => (
+                      <div key={i} className="p-4 bg-slate-900/50 border border-slate-800 rounded-xl">
+                        <p className="text-slate-300 text-sm leading-relaxed">{concept}</p>
+                      </div>
+                    ))
+                  ) : (
+                    <p className="text-slate-500 text-sm">No recurring concepts detected.</p>
+                  )}
+                </div>
+              </div>
+
+              <div className="bg-[#0d1425] border border-slate-800 p-6 rounded-2xl">
+                <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
+                  <Sparkles className="w-5 h-5 text-indigo-500" />
+                  Short Answer Questions
+                </h3>
+                <div className="space-y-4">
+                  {result.predicted_questions.short.map((question, i) => (
+                    <div key={i} className="p-4 bg-slate-900/50 border border-slate-800 rounded-xl">
+                      <p className="text-slate-300 text-sm leading-relaxed">{question}</p>
+                    </div>
+                  ))}
+                </div>
               </div>
 
               <div className="bg-[#0d1425] border border-slate-800 p-6 rounded-2xl">
@@ -215,7 +246,7 @@ export default function PapersAnalyzer() {
                   Long Answer Questions
                 </h3>
                 <div className="space-y-4">
-                  {result.longAnswerQuestions.map((question, i) => (
+                  {result.predicted_questions.long.map((question, i) => (
                     <div key={i} className="p-4 bg-slate-900/50 border border-slate-800 rounded-xl">
                       <p className="text-slate-300 text-sm leading-relaxed">{question}</p>
                     </div>
@@ -226,10 +257,10 @@ export default function PapersAnalyzer() {
               <div className="bg-[#0d1425] border border-slate-800 p-6 rounded-2xl">
                 <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
                   <AlertCircle className="w-5 h-5 text-amber-500" />
-                  Conceptual / Tricky Questions
+                  Conceptual Questions
                 </h3>
                 <div className="space-y-4">
-                  {result.trickyQuestions.map((question, i) => (
+                  {result.predicted_questions.conceptual.map((question, i) => (
                     <div key={i} className="p-4 bg-slate-900/50 border border-slate-800 rounded-xl">
                       <p className="text-slate-300 text-sm leading-relaxed">{question}</p>
                     </div>
