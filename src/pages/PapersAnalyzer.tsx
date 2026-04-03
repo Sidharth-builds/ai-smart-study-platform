@@ -51,18 +51,11 @@ export default function PapersAnalyzer() {
 
     let pdf: any;
     try {
-      pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+      const uint8Array = new Uint8Array(arrayBuffer.slice(0));
+      pdf = await pdfjsLib.getDocument({ data: uint8Array }).promise;
     } catch (err) {
       console.error("PDFJS ERROR:", err);
-      // Optional fallback to local worker if CDN fails
-      pdfjsLib.GlobalWorkerOptions.workerSrc =
-        new URL("pdfjs-dist/build/pdf.worker.min.mjs", import.meta.url).toString();
-      try {
-        pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-      } catch (retryErr) {
-        console.error("PDFJS ERROR (local worker):", retryErr);
-        throw new Error("PDF parsing failed - worker issue or invalid PDF");
-      }
+      throw new Error("Worker failed");
     }
 
     let text = "";
@@ -80,7 +73,7 @@ export default function PapersAnalyzer() {
         content = await page.getTextContent();
       } catch (err) {
         console.error(`[PapersAnalyzer] Failed to extract text from page ${i}:`, err);
-        throw new Error("PDF parsing failed");
+        throw new Error("PDF text extraction failed");
       }
 
       const pageText = content.items.map((item: any) => item.str).join(" ");
@@ -94,6 +87,15 @@ export default function PapersAnalyzer() {
     setError(null);
     setStatus("Preparing analysis...");
     setResult(null);
+
+    const API_KEY = import.meta.env.VITE_GEMINI_API_KEY;
+    console.log("Gemini API Key:", API_KEY);
+    if (!API_KEY) {
+      setError("Missing API Key");
+      setLoading(false);
+      setStatus(null);
+      return;
+    }
 
     if (files.length === 0) {
       setError("Please select at least one PDF file.");
@@ -154,8 +156,14 @@ export default function PapersAnalyzer() {
         setError("Failed to read file");
       } else if (msg.includes("Invalid PDF")) {
         setError("Invalid PDF or unsupported format");
+      } else if (msg.includes("Worker failed")) {
+        setError("Worker failed");
+      } else if (msg.includes("detached")) {
+        setError("Buffer issue");
       } else if (msg.includes("PDF parsing failed")) {
         setError("PDF parsing failed");
+      } else if (msg.includes("PDF text extraction failed")) {
+        setError("PDF text extraction failed");
       } else if (msg.includes("invalid JSON") || msg.includes("invalid json")) {
         setError("Invalid JSON response");
       } else if (msg.includes("Gemini")) {
