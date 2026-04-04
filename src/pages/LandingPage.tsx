@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { BookOpen, Brain, Users, Zap, ArrowRight } from 'lucide-react';
 import { motion } from 'motion/react';
@@ -7,6 +7,7 @@ import { useAuth } from '../lib/AuthContext';
 export default function LandingPage() {
   const { user, loading } = useAuth();
   const navigate = useNavigate();
+  const [isDemoOpen, setIsDemoOpen] = useState(false);
 
   useEffect(() => {
     if (!loading && user) {
@@ -53,7 +54,10 @@ export default function LandingPage() {
               Start Studying Now
               <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
             </Link>
-            <button className="bg-slate-800 px-8 py-4 rounded-xl font-bold text-lg hover:bg-slate-700 transition-all border border-slate-700">
+            <button
+              onClick={() => setIsDemoOpen(true)}
+              className="bg-slate-800 px-8 py-4 rounded-xl font-bold text-lg hover:bg-slate-700 transition-all border border-slate-700"
+            >
               Watch Demo
             </button>
           </div>
@@ -86,6 +90,44 @@ export default function LandingPage() {
           </div>
         </div>
       </section>
+
+      {isDemoOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm px-6">
+          <div className="w-full max-w-2xl bg-[#0d1425] border border-slate-800 rounded-3xl p-8 shadow-2xl">
+            <div className="flex items-start justify-between gap-6 mb-6">
+              <div>
+                <h2 className="text-2xl font-bold text-white">How the System Works</h2>
+                <p className="text-slate-400 mt-2">
+                  A quick walkthrough of the AI Smart Study flow.
+                </p>
+              </div>
+              <button
+                onClick={() => setIsDemoOpen(false)}
+                className="text-slate-400 hover:text-white transition-colors text-sm"
+              >
+                Close
+              </button>
+            </div>
+
+            <div className="space-y-6 text-slate-300">
+              <div className="p-4 bg-slate-900/60 border border-slate-800 rounded-2xl">
+                <p className="text-sm font-semibold text-white">Step 1: Upload study material or PDFs</p>
+              </div>
+              <div className="p-4 bg-slate-900/60 border border-slate-800 rounded-2xl">
+                <p className="text-sm font-semibold text-white">Step 2: AI processes the data</p>
+              </div>
+              <div className="p-4 bg-slate-900/60 border border-slate-800 rounded-2xl">
+                <p className="text-sm font-semibold text-white">Step 3: Generate:</p>
+                <ul className="mt-3 space-y-2 text-sm text-slate-400">
+                  <li>- Summaries</li>
+                  <li>- Flashcards</li>
+                  <li>- Predicted Questions</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
