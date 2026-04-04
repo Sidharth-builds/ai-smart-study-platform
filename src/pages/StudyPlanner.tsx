@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Calendar, Plus, CheckCircle2, Circle, Clock, AlertCircle, Trash2, TrendingUp } from 'lucide-react';
 import { useAuth } from '../lib/AuthContext';
-import { getStudyTasks, addStudyTask, updateStudyTask, StudyTask } from '../lib/firebaseService';
+import { getStudyTasks, addStudyTask, updateStudyTask, deleteStudyTask, StudyTask } from '../lib/firebaseService';
 import { motion, AnimatePresence } from 'motion/react';
 import confetti from 'canvas-confetti';
 
@@ -68,6 +68,17 @@ export default function StudyPlanner() {
       fetchTasks();
     } catch (error) {
       console.error("Error updating task:", error);
+    }
+  };
+
+  const handleDelete = async (taskId?: string) => {
+    if (!taskId) return;
+    try {
+      console.log("Deleting task:", taskId);
+      await deleteStudyTask(taskId);
+      setTasks((prev) => prev.filter((task) => task.id !== taskId));
+    } catch (error) {
+      console.error("Error deleting task:", error);
     }
   };
 
@@ -214,7 +225,10 @@ export default function StudyPlanner() {
                           </div>
                         </div>
 
-                        <button className="opacity-0 group-hover:opacity-100 p-2 text-slate-600 hover:text-red-400 transition-all">
+                        <button
+                          onClick={() => handleDelete(task.id)}
+                          className="opacity-0 group-hover:opacity-100 p-2 text-slate-600 hover:text-red-400 transition-all"
+                        >
                           <Trash2 className="w-4 h-4" />
                         </button>
                       </motion.div>

@@ -1,10 +1,14 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { FileText, Sparkles, Upload, Copy, Save, CheckCircle2 } from 'lucide-react';
 import { generateStudyContent, type SummaryMode } from '../lib/gemini';
 import { db } from '../lib/firebase';
 import { collection, addDoc, Timestamp } from 'firebase/firestore';
 import { useAuth } from '../lib/AuthContext';
 import { COLLECTIONS } from '../lib/firebaseService';
+import * as pdfjsLib from "pdfjs-dist";
+
+pdfjsLib.GlobalWorkerOptions.workerSrc =
+  "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
 
 interface SummaryResult {
   summary: string;
@@ -67,6 +71,46 @@ export default function AISummarizer() {
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const { user } = useAuth();
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  const extractTextFromPdf = async (file: File): Promise<string> => {
+    if (!pdfjsLib.GlobalWorkerOptions.workerSrc) {
+      throw new Error("PDF worker not loaded");
+    }
+
+    const arrayBuffer = await file.arrayBuffer();
+    const header = new Uint8Array(arrayBuffer, 0, 4);
+    const isPdf = header[0] === 0x25 && header[1] === 0x50 && header[2] === 0x44 && header[3] === 0x46;
+    if (!isPdf) {
+      throw new Error("Invalid PDF or unsupported format");
+    }
+
+    const safeBuffer = new Uint8Array(arrayBuffer.slice(0));
+    const pdf = await pdfjsLib.getDocument({ data: safeBuffer }).promise;
+
+    let extracted = "";
+    for (let i = 1; i <= pdf.numPages; i++) {
+      const page = await pdf.getPage(i);
+      const content = await page.getTextContent();
+      const pageText = content.items.map((item: any) => item.str).join(" ");
+      extracted += pageText + "\n";
+    }
+    return extracted;
+  };
+
+  const handleFileSelect = async (file: File) => {
+    setLoading(true);
+    setSaved(false);
+    try {
+      const extractedText = await extractTextFromPdf(file);
+      setText(extractedText);
+    } catch (error: any) {
+      console.error(error);
+      alert(`Failed to read PDF: ${error.message || 'Please try another file.'}`);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleSummarize = async () => {
     if (!text) return;
@@ -154,7 +198,23 @@ export default function AISummarizer() {
               For YouTube videos, copy transcript from YouTube and paste here.
             </p>
             <div className="mt-4 flex gap-3">
-              <button className="flex-1 bg-slate-800 hover:bg-slate-700 text-white font-bold py-3 rounded-xl flex items-center justify-center gap-2 transition-all">
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".pdf"
+                className="hidden"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) {
+                    handleFileSelect(file);
+                  }
+                }}
+              />
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                className="flex-1 bg-slate-800 hover:bg-slate-700 text-white font-bold py-3 rounded-xl flex items-center justify-center gap-2 transition-all"
+              >
                 <Upload className="w-5 h-5" />
                 Upload File
               </button>

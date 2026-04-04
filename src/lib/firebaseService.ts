@@ -9,7 +9,8 @@ import {
   orderBy, 
   limit,
   Timestamp,
-  addDoc
+  addDoc,
+  deleteDoc
 } from 'firebase/firestore';
 import { db } from './firebase';
 
@@ -22,8 +23,9 @@ export const COLLECTIONS = {
   MESSAGES: 'Messages',
   PREVIOUS_PAPERS: 'PreviousPapers',
   PREDICTED_QUESTIONS: 'PredictedQuestions',
+  PREDICTIONS: 'predictions',
   STUDY_PROGRESS: 'StudyProgress',
-  STUDY_TASKS: 'StudyTasks',
+  STUDY_TASKS: 'tasks',
   BOOKMARKS: 'Bookmarks',
   STUDY_SESSIONS: 'StudySessions',
 };
@@ -92,6 +94,14 @@ export interface PredictedQuestion {
   predictedTopics: any[];
   questions: { text: string; probability: number; reason: string }[];
   createdAt: Timestamp;
+}
+
+export interface PredictionSession {
+  id?: string;
+  userId: string;
+  topics?: string[];
+  questions: string[];
+  createdAt: Timestamp | Date;
 }
 
 export interface StudyTask {
@@ -181,8 +191,7 @@ export const savePreviousPaper = async (paper: Omit<PreviousPaper, 'id' | 'creat
 export const getPreviousPapers = async (userId: string, subject?: string) => {
   let q = query(
     collection(db, COLLECTIONS.PREVIOUS_PAPERS),
-    where('userId', '==', userId),
-    orderBy('year', 'desc')
+    where('userId', '==', userId)
   );
   
   if (subject) {
@@ -190,43 +199,87 @@ export const getPreviousPapers = async (userId: string, subject?: string) => {
   }
 
   const querySnapshot = await getDocs(q);
-  return querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as PreviousPaper));
+  const papers = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as PreviousPaper));
+  return papers.sort((a, b) => (b.year || 0) - (a.year || 0));
 };
 
 export const getPredictedQuestions = async (userId: string) => {
   const q = query(
     collection(db, COLLECTIONS.PREDICTED_QUESTIONS),
-    where('userId', '==', userId),
-    orderBy('createdAt', 'desc'),
-    limit(3) // Limit to 3 for dashboard
+    where('userId', '==', userId)
   );
   const querySnapshot = await getDocs(q);
+  console.log("[Firestore] fetched dashboard predictions:", querySnapshot.size);
+  const predictions = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as PredictedQuestion));
+  const getMillis = (value: any) =>
+    value?.toMillis ? value.toMillis() : value instanceof Date ? value.getTime() : new Date(value || 0).getTime();
+  return predictions
+    .sort((a, b) => getMillis(b.createdAt) - getMillis(a.createdAt))
+    .slice(0, 3);
+};
+
+export const getUserPredictions = async (userId: string) => {
+  const q = query(
+    collection(db, COLLECTIONS.PREDICTED_QUESTIONS),
+    where('userId', '==', userId),
+  );
+  const querySnapshot = await getDocs(q);
+  console.log("[Firestore] fetched predictions:", querySnapshot.size);
   return querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as PredictedQuestion));
 };
 
 export const savePredictions = async (prediction: Omit<PredictedQuestion, 'id' | 'createdAt'>) => {
+  console.log("[Firestore] saving predictions:", prediction.userId);
   const docRef = await addDoc(collection(db, COLLECTIONS.PREDICTED_QUESTIONS), {
     ...prediction,
-    createdAt: Timestamp.now(),
+    createdAt: new Date(),
   });
   return docRef.id;
+};
+
+export const savePredictionSession = async (session: Omit<PredictionSession, 'id' | 'createdAt'>) => {
+  console.log("[Firestore] saving prediction session:", session.userId);
+  const docRef = await addDoc(collection(db, COLLECTIONS.PREDICTIONS), {
+    ...session,
+    createdAt: new Date(),
+  });
+  return docRef.id;
+};
+
+export const getPredictionSessions = async (userId: string) => {
+  const q = query(
+    collection(db, COLLECTIONS.PREDICTIONS),
+    where('userId', '==', userId)
+  );
+  const querySnapshot = await getDocs(q);
+  const sessions = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as PredictionSession));
+  const getMillis = (value: any) =>
+    value?.toMillis ? value.toMillis() : value instanceof Date ? value.getTime() : new Date(value || 0).getTime();
+  const sorted = sessions.sort((a, b) => getMillis(b.createdAt) - getMillis(a.createdAt));
+  console.log("Fetched predictions:", sorted);
+  return sorted;
 };
 
 // Study Planner Functions
 export const getStudyTasks = async (userId: string) => {
   const q = query(
     collection(db, COLLECTIONS.STUDY_TASKS),
-    where('userId', '==', userId),
-    orderBy('date', 'asc')
+    where('userId', '==', userId)
   );
   const querySnapshot = await getDocs(q);
-  return querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as StudyTask));
+  const tasks = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as StudyTask));
+  const getMillis = (value: any) =>
+    value?.toMillis ? value.toMillis() : value instanceof Date ? value.getTime() : new Date(value || 0).getTime();
+  const sorted = tasks.sort((a, b) => getMillis(a.createdAt) - getMillis(b.createdAt));
+  console.log("[Firestore] fetched study tasks:", sorted.length);
+  return sorted;
 };
 
 export const addStudyTask = async (task: Omit<StudyTask, 'id' | 'createdAt'>) => {
+  console.log("[Firestore] saving study task:", task.userId);
   const docRef = await addDoc(collection(db, COLLECTIONS.STUDY_TASKS), {
     ...task,
-    createdAt: Timestamp.now(),
+    createdAt: new Date(),
   });
   return docRef.id;
 };
@@ -236,15 +289,22 @@ export const updateStudyTask = async (taskId: string, updates: Partial<StudyTask
   await setDoc(docRef, updates, { merge: true });
 };
 
+export const deleteStudyTask = async (taskId: string) => {
+  const docRef = doc(db, COLLECTIONS.STUDY_TASKS, taskId);
+  await deleteDoc(docRef);
+};
+
 // Study Room Message Functions
 export const getRoomMessages = async (roomId: string) => {
   const q = query(
     collection(db, COLLECTIONS.MESSAGES),
-    where('roomId', '==', roomId),
-    orderBy('createdAt', 'asc')
+    where('roomId', '==', roomId)
   );
   const querySnapshot = await getDocs(q);
-  return querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as RoomMessage));
+  const messages = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as RoomMessage));
+  const getMillis = (value: any) =>
+    value?.toMillis ? value.toMillis() : value instanceof Date ? value.getTime() : new Date(value || 0).getTime();
+  return messages.sort((a, b) => getMillis(a.createdAt) - getMillis(b.createdAt));
 };
 
 export const saveRoomMessage = async (message: Omit<RoomMessage, 'id' | 'createdAt'>) => {
@@ -281,22 +341,26 @@ export const toggleBookmark = async (userId: string, type: string, content: any)
 export const getBookmarks = async (userId: string) => {
   const q = query(
     collection(db, COLLECTIONS.BOOKMARKS),
-    where('userId', '==', userId),
-    orderBy('createdAt', 'desc')
+    where('userId', '==', userId)
   );
   const querySnapshot = await getDocs(q);
-  return querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Bookmark));
+  const bookmarks = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Bookmark));
+  const getMillis = (value: any) =>
+    value?.toMillis ? value.toMillis() : value instanceof Date ? value.getTime() : new Date(value || 0).getTime();
+  return bookmarks.sort((a, b) => getMillis(b.createdAt) - getMillis(a.createdAt));
 };
 
 // Study Sessions Functions
 export const getStudySessions = async (userId: string) => {
   const q = query(
     collection(db, COLLECTIONS.STUDY_SESSIONS),
-    where('userId', '==', userId),
-    orderBy('date', 'desc')
+    where('userId', '==', userId)
   );
   const querySnapshot = await getDocs(q);
-  return querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as StudySession));
+  const sessions = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as StudySession));
+  const getMillis = (value: any) =>
+    value?.toMillis ? value.toMillis() : value instanceof Date ? value.getTime() : new Date(value || 0).getTime();
+  return sessions.sort((a, b) => getMillis(b.date) - getMillis(a.date));
 };
 
 export const addStudySession = async (session: Omit<StudySession, 'id'>) => {

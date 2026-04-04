@@ -1,6 +1,8 @@
 import React, { useState } from "react";
 import { History, FileUp, Sparkles, Target, AlertCircle, ChevronRight } from "lucide-react";
 import { analyzePreviousPaper } from "../lib/gemini";
+import { savePredictionSession } from "../lib/firebaseService";
+import { useAuth } from "../lib/AuthContext";
 import { motion, AnimatePresence } from "motion/react";
 import * as pdfjsLib from "pdfjs-dist";
 
@@ -25,6 +27,7 @@ export default function PapersAnalyzer() {
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<AnalysisResult | null>(null);
+  const { user } = useAuth();
 
   const extractTextFromPdf = async (file: File): Promise<string> => {
     if (!pdfjsLib.GlobalWorkerOptions.workerSrc) {
@@ -54,8 +57,22 @@ export default function PapersAnalyzer() {
       const uint8Array = new Uint8Array(arrayBuffer.slice(0));
       pdf = await pdfjsLib.getDocument({ data: uint8Array }).promise;
     } catch (err) {
-      console.error("PDFJS ERROR:", err);
-      throw new Error("Worker failed");
+      console.error("PDFJS ERROR (getDocument):", err);
+      const name = String((err as any)?.name || "");
+      const message = String((err as any)?.message || "").toLowerCase();
+      if (name === "InvalidPDFException") {
+        throw new Error("Invalid PDF or unsupported format");
+      }
+      if (name === "PasswordException") {
+        throw new Error("Password-protected PDF is not supported");
+      }
+      if (message.includes("worker")) {
+        throw new Error("Worker failed");
+      }
+      if (message.includes("detached")) {
+        throw new Error("Buffer issue");
+      }
+      throw new Error("PDF parsing failed");
     }
 
     let text = "";
@@ -146,6 +163,19 @@ export default function PapersAnalyzer() {
       }
 
       setResult(data);
+      if (user) {
+        const topics = data.important_topics.map((topic) => topic.name);
+        const questions = [
+          ...data.predicted_questions.short,
+          ...data.predicted_questions.long,
+          ...data.predicted_questions.conceptual,
+        ];
+        await savePredictionSession({
+          userId: user.uid,
+          topics,
+          questions,
+        });
+      }
       setStatus(null);
     } catch (err: any) {
       console.error("Analysis error:", err);
@@ -156,6 +186,8 @@ export default function PapersAnalyzer() {
         setError("Failed to read file");
       } else if (msg.includes("Invalid PDF")) {
         setError("Invalid PDF or unsupported format");
+      } else if (msg.includes("Password-protected")) {
+        setError("Password-protected PDF is not supported");
       } else if (msg.includes("Worker failed")) {
         setError("Worker failed");
       } else if (msg.includes("detached")) {

@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Activity, Bell, Clock3, Flame, GraduationCap, Mail, Shield, Trophy, UserCircle } from 'lucide-react';
 import { useAuth } from '../lib/AuthContext';
 import { getTotalStudyHours, getSummariesCreated, getCurrentStreak } from '../services/profileService';
-import { collection, query, where, orderBy, limit, getDocs, Timestamp, doc, getDoc } from 'firebase/firestore';
+import { collection, query, where, limit, getDocs, Timestamp, doc, getDoc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { COLLECTIONS } from '../lib/firebaseService';
 
@@ -87,12 +87,15 @@ export default function Profile() {
   const getRecentActivities = async (userId: string): Promise<ActivityItem[]> => {
     const q = query(
       collection(db, 'activity'),
-      where('userId', '==', userId),
-      orderBy('timestamp', 'desc'),
-      limit(10)
+      where('userId', '==', userId)
     );
     const querySnapshot = await getDocs(q);
-    return querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as ActivityItem));
+    const activities = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as ActivityItem));
+    const getMillis = (value: any) =>
+      value?.toMillis ? value.toMillis() : value instanceof Date ? value.getTime() : new Date(value || 0).getTime();
+    return activities
+      .sort((a, b) => getMillis(b.timestamp) - getMillis(a.timestamp))
+      .slice(0, 10);
   };
 
   const getUserProfile = async (userId: string): Promise<UserProfile> => {
