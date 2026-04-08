@@ -75,6 +75,7 @@ export interface Note {
   content: string;
   createdAt: Timestamp;
   updatedAt: Timestamp;
+  type?: string;
 }
 
 export interface FlashcardDeck {
@@ -204,6 +205,34 @@ export const getRecentNotes = async (userId: string, count = 3) => {
 
   console.log("Fetched data:", notes);
   return notes;
+};
+
+export const getRecentSummaries = async (userId: string, count = 3) => {
+  const docs = await fetchDocsWithFallback(
+    COLLECTIONS.NOTES,
+    (collectionName) => query(
+      collection(db, collectionName),
+      where('userId', '==', userId),
+      where('type', '==', 'ai_summary'),
+      orderBy('updatedAt', 'desc'),
+      limit(count),
+    ),
+    LEGACY_COLLECTIONS.NOTES,
+    (collectionName) => query(
+      collection(db, collectionName),
+      where('userId', '==', userId),
+      where('type', '==', 'ai_summary'),
+      limit(count),
+    ),
+  );
+
+  const summaries = docs
+    .map((doc) => ({ id: doc.id, ...doc.data() } as Note))
+    .sort((a, b) => getMillis(b.updatedAt ?? b.createdAt) - getMillis(a.updatedAt ?? a.createdAt))
+    .slice(0, count);
+
+  console.log("Fetched summaries:", summaries);
+  return summaries;
 };
 
 export const getStudyRooms = async (userId?: string) => {

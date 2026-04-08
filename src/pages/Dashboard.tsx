@@ -15,7 +15,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../lib/AuthContext';
 import { Link } from 'react-router-dom';
-import { getRecentNotes, getStudyRooms, getStudyTasks, Note, StudyRoom, StudyTask } from '../lib/firebaseService';
+import { getRecentSummaries, getStudyRooms, getStudyTasks, Note, StudyRoom, StudyTask } from '../lib/firebaseService';
 import { getStudyHours, getMasteredCards, getExamReadiness, getWeeklyGrowth } from '../services/dashboardService';
 import { getFlashcardDecksSummary } from '../services/flashcardService';
 import { getPredictedQuestions, PredictedQuestion } from '../lib/firebaseService';
@@ -33,6 +33,11 @@ export default function Dashboard() {
   const [flashcardDecks, setFlashcardDecks] = useState<{ title: string; masteryPercentage: number; cardCount: number }[]>([]);
   const [loading, setLoading] = useState(true);
 
+  const getTaskTime = (task: StudyTask) => {
+    const parsedDate = new Date(task.date).getTime();
+    return Number.isNaN(parsedDate) ? 0 : parsedDate;
+  };
+
   useEffect(() => {
     if (user) {
       fetchDashboardData();
@@ -43,8 +48,8 @@ export default function Dashboard() {
     if (!user) return;
     try {
       const [notes, rooms, tasks, hours, cards, readiness, growth, preds, decks] = await Promise.all([
-        getRecentNotes(user.uid, 3).catch(err => {
-          console.warn("Notes permission error:", err);
+        getRecentSummaries(user.uid, 3).catch(err => {
+          console.warn("Summaries permission error:", err);
           return [];
         }),
         getStudyRooms(user.uid).catch(err => {
@@ -82,7 +87,12 @@ export default function Dashboard() {
       ]);
       setRecentNotes(notes);
       setStudyRooms(rooms.slice(0, 2));
-      setStudyTasks(tasks.filter(t => !t.completed).slice(0, 3));
+      setStudyTasks(
+        tasks
+          .filter((task) => !task.completed)
+          .sort((a, b) => getTaskTime(a) - getTaskTime(b))
+          .slice(0, 3),
+      );
       setStudyHours(hours);
       setMasteredCards(cards);
       setExamReadiness(readiness);
@@ -160,7 +170,7 @@ export default function Dashboard() {
             <div className="p-6 border-b border-slate-800 flex justify-between items-center">
               <h3 className="text-lg font-bold text-white flex items-center gap-2">
                 <FileText className="w-5 h-5 text-indigo-500" />
-                Recent Notes
+                Recent Summarizers
               </h3>
               <Link to="/summarizer" className="text-indigo-400 text-sm font-bold hover:underline flex items-center gap-1">
                 View All <ChevronRight className="w-4 h-4" />
@@ -171,7 +181,7 @@ export default function Dashboard() {
                 <div key={i} className="p-4 bg-slate-900/50 border border-slate-800 rounded-xl hover:bg-slate-800/50 transition-all cursor-pointer group">
                   <div className="flex justify-between items-start mb-2">
                     <span className="text-[10px] font-bold uppercase tracking-wider text-indigo-400 bg-indigo-400/10 px-2 py-0.5 rounded">
-                      Note
+                      Summary
                     </span>
                     <span className="text-[10px] text-slate-500">
                       {new Date((note.updatedAt ?? note.createdAt).toDate()).toLocaleDateString()}
@@ -180,7 +190,7 @@ export default function Dashboard() {
                   <h4 className="font-bold text-white group-hover:text-indigo-400 transition-colors truncate">{note.title}</h4>
                 </div>
               )) : (
-                <div className="col-span-2 text-center py-8 text-slate-500 italic text-sm">No notes yet. Start by summarizing a lecture!</div>
+                <div className="col-span-2 text-center py-8 text-slate-500 italic text-sm">No summaries yet. Save an AI summary to see it here.</div>
               )}
             </div>
           </div>
