@@ -6,6 +6,7 @@ import { db } from '../lib/firebase';
 import { collection, addDoc, Timestamp, updateDoc, doc, query, where, getDocs, deleteDoc } from 'firebase/firestore';
 import { useAuth } from '../lib/AuthContext';
 import { jsPDF } from 'jspdf';
+import { extractMeaningfulTextFromHtml, extractTextFromPdfFile } from '../lib/documentProcessing';
 
 interface Flashcard {
   id?: string;
@@ -120,16 +121,7 @@ export default function Flashcards() {
       case 'file':
         if (!fileInput) throw new Error('No file selected');
         if (fileInput.type === 'application/pdf') {
-          // For PDF, try to read as text (basic implementation)
-          return new Promise((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onload = (e) => {
-              const text = e.target?.result as string;
-              resolve(text);
-            };
-            reader.onerror = () => reject(new Error('Failed to read PDF'));
-            reader.readAsText(fileInput);
-          });
+          return extractTextFromPdfFile(fileInput);
         } else if (fileInput.type.startsWith('image/')) {
           // For images, placeholder - would need OCR
           return `Image file: ${fileInput.name} - OCR not implemented yet`;
@@ -137,8 +129,25 @@ export default function Flashcards() {
           return `Unsupported file: ${fileInput.name}`;
         }
       case 'url':
-        const response = await fetch(urlInput);
-        return await response.text();
+        try {
+          const response = await fetch(`https://api.allorigins.win/raw?url=${encodeURIComponent(urlInput)}`);
+
+          if (!response.ok) {
+            throw new Error('Unable to fetch content from URL');
+          }
+
+          const html = await response.text();
+          const extractedText = extractMeaningfulTextFromHtml(html);
+
+          if (!extractedText.trim()) {
+            throw new Error('Unable to fetch content from URL');
+          }
+
+          return extractedText;
+        } catch (error) {
+          console.error('Error fetching URL content:', error);
+          throw new Error('Unable to fetch content from URL');
+        }
       case 'youtube':
         return `YouTube video: ${youtubeInput}`;
       default:

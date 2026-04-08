@@ -1,4 +1,5 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
+import { cleanAcademicText } from "./documentProcessing";
 
 type StudyContent = {
   summary: string;
@@ -180,18 +181,21 @@ export const generateStudyContent = async (
 
 export const generateFlashcards = async (text: string): Promise<Flashcard[]> => {
   try {
-    const input = cleanText(text).slice(0, 5000);
+    const input = cleanAcademicText(cleanText(text), { maxChars: 7000 });
 
     if (!input) {
       throw new Error("Unable to extract meaningful content");
     }
 
     const concepts = await generateJson<string[]>(`
-From the following study material, extract the most important concepts, definitions, and key topics.
+Generate flashcards ONLY from meaningful academic content.
+Ignore technical, metadata, or irrelevant text.
+
+From the following cleaned study material, extract the most important concepts, definitions, and key topics.
 
 Rules:
-- Ignore metadata, formatting, and noise
-- Focus only on meaningful academic content
+- Ignore metadata, file structure content, system-generated text, formatting, and noise
+- Focus only on important academic concepts
 - Return a list of key points
 
 Return JSON:
@@ -218,12 +222,17 @@ ${input}
     }
 
     const flashcards = await generateJson<GeneratedFlashcard[]>(`
+Generate flashcards ONLY from meaningful academic content.
+Ignore technical, metadata, or irrelevant text.
+
 Generate exam-style flashcards from these concepts.
 
 Rules:
 - Questions must be clear and meaningful
 - Focus on definitions and explanations
 - Avoid trivial or irrelevant questions
+- Only generate flashcards from important academic concepts
+- Ignore metadata, file structure content, system-generated text, and irrelevant technical descriptions
 
 Return JSON:
 [
