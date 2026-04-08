@@ -17,8 +17,8 @@ import { db } from './firebase';
 // Collection Names
 export const COLLECTIONS = {
   USERS: 'Users',
-  NOTES: 'Notes',
-  FLASHCARDS: 'Flashcards',
+  NOTES: 'notes',
+  FLASHCARDS: 'decks',
   STUDY_ROOMS: 'StudyRooms',
   MESSAGES: 'Messages',
   PREVIOUS_PAPERS: 'PreviousPapers',
@@ -28,6 +28,34 @@ export const COLLECTIONS = {
   STUDY_TASKS: 'tasks',
   BOOKMARKS: 'Bookmarks',
   STUDY_SESSIONS: 'StudySessions',
+};
+
+const LEGACY_COLLECTIONS = {
+  NOTES: 'Notes',
+  FLASHCARDS: 'Flashcards',
+  PREDICTIONS: 'PredictedQuestions',
+};
+
+const getMillis = (value: any) =>
+  value?.toMillis ? value.toMillis() : value instanceof Date ? value.getTime() : new Date(value || 0).getTime();
+
+const fetchDocsWithFallback = async (
+  primaryCollection: string,
+  buildPrimaryQuery: (collectionName: string) => any,
+  legacyCollection?: string,
+  buildLegacyQuery?: (collectionName: string) => any,
+) => {
+  try {
+    const querySnapshot = await getDocs(buildPrimaryQuery(primaryCollection));
+    return querySnapshot.docs;
+  } catch (error) {
+    console.warn(`[Firestore] Primary query failed for ${primaryCollection}:`, error);
+    if (!legacyCollection || !buildLegacyQuery) {
+      throw error;
+    }
+    const fallbackSnapshot = await getDocs(buildLegacyQuery(legacyCollection));
+    return fallbackSnapshot.docs;
+  }
 };
 
 // Types
@@ -153,23 +181,62 @@ export const createUserProfile = async (profile: UserProfile) => {
 };
 
 export const getRecentNotes = async (userId: string, count = 3) => {
-  const q = query(
-    collection(db, COLLECTIONS.NOTES),
-    where('userId', '==', userId),
-    orderBy('updatedAt', 'desc'),
-    limit(count)
+  const docs = await fetchDocsWithFallback(
+    COLLECTIONS.NOTES,
+    (collectionName) => query(
+      collection(db, collectionName),
+      where('userId', '==', userId),
+      orderBy('updatedAt', 'desc'),
+      limit(count),
+    ),
+    LEGACY_COLLECTIONS.NOTES,
+    (collectionName) => query(
+      collection(db, collectionName),
+      where('userId', '==', userId),
+      limit(count),
+    ),
   );
-  const querySnapshot = await getDocs(q);
-  return querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Note));
+
+  const notes = docs
+    .map((doc) => ({ id: doc.id, ...doc.data() } as Note))
+    .sort((a, b) => getMillis(b.updatedAt) - getMillis(a.updatedAt))
+    .slice(0, count);
+
+  console.log("Fetched data:", notes);
+  return notes;
 };
 
-export const getStudyRooms = async () => {
-  const q = query(
-    collection(db, COLLECTIONS.STUDY_ROOMS),
-    orderBy('createdAt', 'desc')
-  );
-  const querySnapshot = await getDocs(q);
-  return querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as StudyRoom));
+export const getStudyRooms = async (userId?: string) => {
+  try {
+    const roomQuery = userId
+      ? query(
+          collection(db, COLLECTIONS.STUDY_ROOMS),
+          where('createdBy', '==', userId),
+          orderBy('createdAt', 'desc'),
+        )
+      : query(
+          collection(db, COLLECTIONS.STUDY_ROOMS),
+          orderBy('createdAt', 'desc'),
+        );
+
+    const querySnapshot = await getDocs(roomQuery);
+    const rooms = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as StudyRoom));
+    console.log("Fetched data:", rooms);
+    return rooms;
+  } catch (error) {
+    console.warn('[Firestore] Study rooms query with orderBy failed, falling back:', error);
+    const fallbackQuery = userId
+      ? query(
+          collection(db, COLLECTIONS.STUDY_ROOMS),
+          where('createdBy', '==', userId),
+        )
+      : query(collection(db, COLLECTIONS.STUDY_ROOMS));
+
+    const querySnapshot = await getDocs(fallbackQuery);
+    const rooms = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as StudyRoom));
+    console.log("Fetched data:", rooms);
+    return rooms;
+  }
 };
 
 export const createStudyRoom = async (roomData: Omit<StudyRoom, 'id' | 'createdAt'>) => {
@@ -204,15 +271,41 @@ export const getPreviousPapers = async (userId: string, subject?: string) => {
 };
 
 export const getPredictedQuestions = async (userId: string) => {
-  const q = query(
-    collection(db, COLLECTIONS.PREDICTED_QUESTIONS),
-    where('userId', '==', userId)
+  const docs = await fetchDocsWithFallback(
+    COLLECTIONS.PREDICTIONS,
+    (collectionName) => query(
+      collection(db, collectionName),
+      where('userId', '==', userId),
+    ),
+    LEGACY_COLLECTIONS.PREDICTIONS,
+    (collectionName) => query(
+      collection(db, collectionName),
+      where('userId', '==', userId),
+    ),
   );
-  const querySnapshot = await getDocs(q);
-  console.log("[Firestore] fetched dashboard predictions:", querySnapshot.size);
-  const predictions = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as PredictedQuestion));
-  const getMillis = (value: any) =>
-    value?.toMillis ? value.toMillis() : value instanceof Date ? value.getTime() : new Date(value || 0).getTime();
+
+  const predictions = docs.map((doc) => {
+    const data = doc.data() as any;
+
+    if (Array.isArray(data.predictedTopics)) {
+      return { id: doc.id, ...data } as PredictedQuestion;
+    }
+
+    const predictedTopics = Array.isArray(data.topics)
+      ? data.topics.map((topic: string) => ({ topic, probability: 75 }))
+      : [];
+
+    return {
+      id: doc.id,
+      userId: data.userId,
+      subject: data.subject ?? "Study Predictions",
+      predictedTopics,
+      questions: Array.isArray(data.questions) ? data.questions.map((text: string) => ({ text, probability: 75, reason: "Generated from prediction session" })) : [],
+      createdAt: data.createdAt,
+    } as PredictedQuestion;
+  });
+
+  console.log("Fetched data:", predictions);
   return predictions
     .sort((a, b) => getMillis(b.createdAt) - getMillis(a.createdAt))
     .slice(0, 3);
@@ -253,8 +346,6 @@ export const getPredictionSessions = async (userId: string) => {
   );
   const querySnapshot = await getDocs(q);
   const sessions = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as PredictionSession));
-  const getMillis = (value: any) =>
-    value?.toMillis ? value.toMillis() : value instanceof Date ? value.getTime() : new Date(value || 0).getTime();
   const sorted = sessions.sort((a, b) => getMillis(b.createdAt) - getMillis(a.createdAt));
   console.log("Fetched predictions:", sorted);
   return sorted;
@@ -268,10 +359,8 @@ export const getStudyTasks = async (userId: string) => {
   );
   const querySnapshot = await getDocs(q);
   const tasks = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as StudyTask));
-  const getMillis = (value: any) =>
-    value?.toMillis ? value.toMillis() : value instanceof Date ? value.getTime() : new Date(value || 0).getTime();
   const sorted = tasks.sort((a, b) => getMillis(a.createdAt) - getMillis(b.createdAt));
-  console.log("[Firestore] fetched study tasks:", sorted.length);
+  console.log("Fetched data:", sorted);
   return sorted;
 };
 

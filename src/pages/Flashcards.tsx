@@ -7,18 +7,23 @@ import { collection, addDoc, Timestamp, updateDoc, doc, query, where, getDocs, d
 import { useAuth } from '../lib/AuthContext';
 import { jsPDF } from 'jspdf';
 import { extractMeaningfulTextFromHtml, extractTextFromPdfFile } from '../lib/documentProcessing';
+import { COLLECTIONS } from '../lib/firebaseService';
 
 interface Flashcard {
   id?: string;
   front: string;
   back: string;
   mastered: boolean;
+  sourceCollection?: string;
 }
+
+const LEGACY_FLASHCARD_COLLECTION = 'Flashcards';
 
 export default function Flashcards() {
   const [showGenerator, setShowGenerator] = useState(false);
   const [showPractice, setShowPractice] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [urlLoading, setUrlLoading] = useState(false);
   const [cards, setCards] = useState<Flashcard[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isFlipped, setIsFlipped] = useState(false);
@@ -29,11 +34,18 @@ export default function Flashcards() {
   const [fileInput, setFileInput] = useState<File | null>(null);
   const [urlInput, setUrlInput] = useState('');
   const [youtubeInput, setYoutubeInput] = useState('');
+  const [urlError, setUrlError] = useState<string | null>(null);
   const [filePreview, setFilePreview] = useState<string | null>(null);
   const [editingCard, setEditingCard] = useState<string | null>(null);
   const [editFront, setEditFront] = useState('');
   const [editBack, setEditBack] = useState('');
   const { user } = useAuth();
+  const manualPasteInstructions = `Some websites block direct content extraction. Please paste the article or study material here instead.
+
+Tips:
+- Copy the main headings and paragraphs only
+- Remove ads, menus, and unrelated sections
+- Then click Generate Cards again`;
 
   useEffect(() => {
     if (user) {
@@ -54,13 +66,22 @@ export default function Flashcards() {
   const fetchFlashcards = async () => {
     if (!user) return;
     try {
-      const q = query(
-        collection(db, 'Flashcards'),
+      const primarySnapshot = await getDocs(query(
+        collection(db, COLLECTIONS.FLASHCARDS),
         where('userId', '==', user.uid),
-      );
-      const snapshot = await getDocs(q);
-      const flashcards = snapshot.docs.map((docSnapshot) => {
+      ));
+
+      let legacySnapshot = { docs: [] as typeof primarySnapshot.docs };
+      if (LEGACY_FLASHCARD_COLLECTION !== COLLECTIONS.FLASHCARDS) {
+        legacySnapshot = await getDocs(query(
+          collection(db, LEGACY_FLASHCARD_COLLECTION),
+          where('userId', '==', user.uid),
+        ));
+      }
+
+      const flashcards = [...primarySnapshot.docs, ...legacySnapshot.docs].map((docSnapshot) => {
         const data = docSnapshot.data() as {
+          userId?: string;
           question?: string;
           answer?: string;
           front?: string;
@@ -73,8 +94,11 @@ export default function Flashcards() {
           front: data.question ?? data.front ?? '',
           back: data.answer ?? data.back ?? '',
           mastered: Boolean(data.mastered),
+          sourceCollection: docSnapshot.ref.parent.id,
         };
       });
+
+      console.log("Fetched data:", flashcards);
 
       setSavedFlashcards(flashcards);
     } catch (error) {
@@ -92,7 +116,7 @@ export default function Flashcards() {
 
     try {
       const savePromises = generatedCards.map((card) =>
-        addDoc(collection(db, 'Flashcards'), {
+        addDoc(collection(db, COLLECTIONS.FLASHCARDS), {
           userId: user.uid,
           question: card.front,
           answer: card.back,
@@ -107,6 +131,7 @@ export default function Flashcards() {
       return generatedCards.map((card, index) => ({
         ...card,
         id: docRefs[index].id,
+        sourceCollection: COLLECTIONS.FLASHCARDS,
       }));
     } catch (error) {
       console.error('Error saving flashcards:', error);
@@ -130,23 +155,30 @@ export default function Flashcards() {
         }
       case 'url':
         try {
+          setUrlLoading(true);
+          setUrlError(null);
           const response = await fetch(`https://api.allorigins.win/raw?url=${encodeURIComponent(urlInput)}`);
 
           if (!response.ok) {
-            throw new Error('Unable to fetch content from URL');
+            throw new Error('URL_FETCH_BLOCKED');
           }
 
           const html = await response.text();
           const extractedText = extractMeaningfulTextFromHtml(html);
 
           if (!extractedText.trim()) {
-            throw new Error('Unable to fetch content from URL');
+            throw new Error('URL_FETCH_BLOCKED');
           }
 
           return extractedText;
         } catch (error) {
           console.error('Error fetching URL content:', error);
-          throw new Error('Unable to fetch content from URL');
+          setUrlError('Some websites block direct content extraction. Please use PDF or text input instead.');
+          setInputType('text');
+          setTextInput((current) => current.trim() ? current : manualPasteInstructions);
+          throw new Error('URL_FETCH_BLOCKED');
+        } finally {
+          setUrlLoading(false);
         }
       case 'youtube':
         return `YouTube video: ${youtubeInput}`;
@@ -173,10 +205,18 @@ export default function Flashcards() {
       fetchFlashcards();
     } catch (error) {
       console.error("Error generating cards:", error);
-      alert(`Failed to generate flashcards: ${error.message || 'Please try again.'}`);
+      const errorMessage = error instanceof Error ? error.message : 'Please try again.';
+      if (errorMessage !== 'URL_FETCH_BLOCKED') {
+        alert(`Failed to generate flashcards: ${errorMessage}`);
+      }
     } finally {
       setLoading(false);
     }
+  };
+
+  const retryUrlFetch = async () => {
+    if (!urlInput.trim() || loading) return;
+    await handleGenerateCards();
   };
 
   const markAsMastered = async (cardIndex: number, mastered: boolean) => {
@@ -184,7 +224,7 @@ export default function Flashcards() {
       const currentCard = cards[cardIndex];
       if (!currentCard?.id) return;
 
-      await updateDoc(doc(db, 'Flashcards', currentCard.id), { mastered: !mastered });
+      await updateDoc(doc(db, currentCard.sourceCollection ?? COLLECTIONS.FLASHCARDS, currentCard.id), { mastered: !mastered });
 
       const updatedCards = cards.map((card, index) =>
         index === cardIndex ? { ...card, mastered: !mastered } : card,
@@ -206,7 +246,7 @@ export default function Flashcards() {
       const currentCard = cards[cardIndex];
       if (!currentCard?.id) return;
 
-      await deleteDoc(doc(db, 'Flashcards', currentCard.id));
+      await deleteDoc(doc(db, currentCard.sourceCollection ?? COLLECTIONS.FLASHCARDS, currentCard.id));
 
       const updatedCards = cards.filter((_, index) => index !== cardIndex);
       setCards(updatedCards);
@@ -234,7 +274,7 @@ export default function Flashcards() {
         const currentCard = cards.find((card) => card.id === editingCard);
         if (!currentCard?.id) return;
 
-        await updateDoc(doc(db, 'Flashcards', currentCard.id), {
+        await updateDoc(doc(db, currentCard.sourceCollection ?? COLLECTIONS.FLASHCARDS, currentCard.id), {
           question: editFront,
           answer: editBack,
         });
@@ -527,7 +567,12 @@ export default function Flashcards() {
               ].map(({ type, label, icon: Icon }) => (
                 <button
                   key={type}
-                  onClick={() => setInputType(type as any)}
+                  onClick={() => {
+                    setInputType(type as any);
+                    if (type !== 'url') {
+                      setUrlError(null);
+                    }
+                  }}
                   className={`flex items-center gap-2 px-4 py-2 rounded-xl font-bold transition-all ${
                     inputType === type
                       ? 'bg-indigo-600 text-white'
@@ -545,6 +590,11 @@ export default function Flashcards() {
               {inputType === 'text' && (
                 <div>
                   <label className="text-xs font-bold text-slate-500 uppercase mb-2 block">Study Material</label>
+                  {urlError && (
+                    <div className="mb-3 rounded-xl border border-amber-500/20 bg-amber-500/10 px-4 py-3 text-sm text-amber-300">
+                      {urlError}
+                    </div>
+                  )}
                   <textarea
                     value={textInput}
                     onChange={(e) => setTextInput(e.target.value)}
@@ -634,6 +684,34 @@ export default function Flashcards() {
                     placeholder="https://example.com/article"
                     className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/50"
                   />
+                  <p className="mt-3 text-sm text-slate-500">
+                    We’ll try to extract headings and paragraphs from the page content.
+                  </p>
+                  {urlError && (
+                    <div className="mt-3 rounded-xl border border-amber-500/20 bg-amber-500/10 px-4 py-3 text-sm text-amber-300">
+                      <p>{urlError}</p>
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          onClick={retryUrlFetch}
+                          disabled={loading || urlLoading || !urlInput.trim()}
+                          className="rounded-lg bg-amber-500/20 px-3 py-2 text-xs font-bold text-amber-200 transition-all hover:bg-amber-500/30 disabled:opacity-50"
+                        >
+                          {urlLoading ? 'Retrying...' : 'Retry'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setInputType('text');
+                            setTextInput((current) => current.trim() ? current : manualPasteInstructions);
+                          }}
+                          className="rounded-lg bg-slate-800 px-3 py-2 text-xs font-bold text-slate-200 transition-all hover:bg-slate-700"
+                        >
+                          Paste Content Manually
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -664,7 +742,7 @@ export default function Flashcards() {
                 className="flex-1 bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-700 disabled:cursor-not-allowed text-white font-bold py-3 rounded-xl shadow-lg shadow-indigo-600/20 transition-all flex items-center justify-center gap-2"
               >
                 {loading ? <RotateCw className="w-5 h-5 animate-spin" /> : <Sparkles className="w-5 h-5" />}
-                {loading ? 'Generating...' : 'Generate Cards'}
+                {loading ? (inputType === 'url' ? 'Fetching URL...' : 'Generating...') : 'Generate Cards'}
               </button>
             </div>
           </motion.div>

@@ -2,6 +2,8 @@ import { collection, query, where, getDocs } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { COLLECTIONS, StudySession } from '../lib/firebaseService';
 
+const LEGACY_FLASHCARD_COLLECTION = 'Flashcards';
+
 // Helper function to get start of week (Monday)
 function getStartOfWeek(date: Date): Date {
   const d = new Date(date);
@@ -24,28 +26,54 @@ export const getStudyHours = async (userId: string): Promise<number> => {
   );
   const querySnapshot = await getDocs(q);
   const sessions = querySnapshot.docs.map(doc => doc.data());
+  console.log("Fetched data:", sessions);
   return sessions.reduce((sum, session) => sum + (session.duration || 0), 0);
 };
 
 // Get mastered cards count
 export const getMasteredCards = async (userId: string): Promise<number> => {
-  const q = query(
+  const primaryQuery = query(
     collection(db, COLLECTIONS.FLASHCARDS),
     where('userId', '==', userId),
     where('mastered', '==', true)
   );
-  const querySnapshot = await getDocs(q);
-  return querySnapshot.size;
+
+  try {
+    const querySnapshot = await getDocs(primaryQuery);
+    console.log("Fetched data:", querySnapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() })));
+    return querySnapshot.size;
+  } catch (error) {
+    console.warn('[Firestore] Mastered cards query failed, falling back:', error);
+    const fallbackSnapshot = await getDocs(query(
+      collection(db, LEGACY_FLASHCARD_COLLECTION),
+      where('userId', '==', userId),
+      where('mastered', '==', true),
+    ));
+    console.log("Fetched data:", fallbackSnapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() })));
+    return fallbackSnapshot.size;
+  }
 };
 
 // Get total cards count
 export const getTotalCards = async (userId: string): Promise<number> => {
-  const q = query(
+  const primaryQuery = query(
     collection(db, COLLECTIONS.FLASHCARDS),
     where('userId', '==', userId)
   );
-  const querySnapshot = await getDocs(q);
-  return querySnapshot.size;
+
+  try {
+    const querySnapshot = await getDocs(primaryQuery);
+    console.log("Fetched data:", querySnapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() })));
+    return querySnapshot.size;
+  } catch (error) {
+    console.warn('[Firestore] Total cards query failed, falling back:', error);
+    const fallbackSnapshot = await getDocs(query(
+      collection(db, LEGACY_FLASHCARD_COLLECTION),
+      where('userId', '==', userId),
+    ));
+    console.log("Fetched data:", fallbackSnapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() })));
+    return fallbackSnapshot.size;
+  }
 };
 
 // Get exam readiness percentage
@@ -71,6 +99,7 @@ export const getWeeklyGrowth = async (userId: string): Promise<number> => {
   );
   const querySnapshot = await getDocs(q);
   const sessions = querySnapshot.docs.map(doc => ({ ...doc.data(), date: doc.data().date.toDate() } as StudySession & { date: Date }));
+  console.log("Fetched data:", sessions);
 
   const thisWeekHours = sessions
     .filter(session => session.date >= thisWeekStart && session.date <= thisWeekEnd)

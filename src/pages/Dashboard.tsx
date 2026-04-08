@@ -15,7 +15,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../lib/AuthContext';
 import { Link } from 'react-router-dom';
-import { getRecentNotes, getStudyRooms, getStudyTasks, getPreviousPapers, Note, StudyRoom, StudyTask, PreviousPaper } from '../lib/firebaseService';
+import { getRecentNotes, getStudyRooms, getStudyTasks, Note, StudyRoom, StudyTask } from '../lib/firebaseService';
 import { getStudyHours, getMasteredCards, getExamReadiness, getWeeklyGrowth } from '../services/dashboardService';
 import { getFlashcardDecksSummary } from '../services/flashcardService';
 import { getPredictedQuestions, PredictedQuestion } from '../lib/firebaseService';
@@ -30,7 +30,7 @@ export default function Dashboard() {
   const [examReadiness, setExamReadiness] = useState(0);
   const [weeklyGrowth, setWeeklyGrowth] = useState(0);
   const [predictions, setPredictions] = useState<PredictedQuestion[]>([]);
-  const [flashcardDecks, setFlashcardDecks] = useState<{ title: string; masteryPercentage: number }[]>([]);
+  const [flashcardDecks, setFlashcardDecks] = useState<{ title: string; masteryPercentage: number; cardCount: number }[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -43,11 +43,11 @@ export default function Dashboard() {
     if (!user) return;
     try {
       const [notes, rooms, tasks, hours, cards, readiness, growth, preds, decks] = await Promise.all([
-        getRecentNotes(user.uid, 4).catch(err => {
+        getRecentNotes(user.uid, 3).catch(err => {
           console.warn("Notes permission error:", err);
           return [];
         }),
-        getStudyRooms().catch(err => {
+        getStudyRooms(user.uid).catch(err => {
           console.warn("Rooms permission error:", err);
           return [];
         }),
@@ -89,12 +89,16 @@ export default function Dashboard() {
       setWeeklyGrowth(growth);
       setPredictions(preds);
       setFlashcardDecks(decks);
+      console.log("Fetched data:", { notes, tasks, preds, decks });
     } catch (error) {
       console.error("Error fetching dashboard data:", error);
     } finally {
       setLoading(false);
     }
   };
+
+  const flashcardDeckCount = flashcardDecks.length;
+  const totalFlashcards = flashcardDecks.reduce((sum, deck) => sum + deck.cardCount, 0);
 
   return (
     <div className="space-y-8 pb-12">
@@ -163,13 +167,15 @@ export default function Dashboard() {
               </Link>
             </div>
             <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-4">
-              {recentNotes.length > 0 ? recentNotes.map((note, i) => (
+              {recentNotes.length > 0 ? recentNotes.slice(0, 3).map((note, i) => (
                 <div key={i} className="p-4 bg-slate-900/50 border border-slate-800 rounded-xl hover:bg-slate-800/50 transition-all cursor-pointer group">
                   <div className="flex justify-between items-start mb-2">
                     <span className="text-[10px] font-bold uppercase tracking-wider text-indigo-400 bg-indigo-400/10 px-2 py-0.5 rounded">
                       Note
                     </span>
-                    <span className="text-[10px] text-slate-500">{new Date(note.updatedAt.toDate()).toLocaleDateString()}</span>
+                    <span className="text-[10px] text-slate-500">
+                      {new Date((note.updatedAt ?? note.createdAt).toDate()).toLocaleDateString()}
+                    </span>
                   </div>
                   <h4 className="font-bold text-white group-hover:text-indigo-400 transition-colors truncate">{note.title}</h4>
                 </div>
@@ -219,16 +225,21 @@ export default function Dashboard() {
                 <Layers className="w-5 h-5 text-purple-500" />
                 Flashcards
               </h3>
-              <Link to="/flashcards" className="text-slate-500 hover:text-white transition-colors">
-                <ChevronRight className="w-5 h-5" />
-              </Link>
+              <div className="flex items-center gap-3">
+                <span className="text-xs font-bold text-slate-500">
+                  {flashcardDeckCount} deck{flashcardDeckCount === 1 ? '' : 's'} · {totalFlashcards} cards
+                </span>
+                <Link to="/flashcards" className="text-slate-500 hover:text-white transition-colors">
+                  <ChevronRight className="w-5 h-5" />
+                </Link>
+              </div>
             </div>
             <div className="space-y-4">
               {flashcardDecks.length > 0 ? flashcardDecks.map((deck, i) => (
                 <div key={i} className="space-y-2">
                   <div className="flex justify-between text-sm">
                     <span className="text-slate-300 font-medium">{deck.title}</span>
-                    <span className="text-slate-500">{deck.masteryPercentage}%</span>
+                    <span className="text-slate-500">{deck.cardCount} cards · {deck.masteryPercentage}%</span>
                   </div>
                   <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
                     <div className="h-full bg-purple-500" style={{ width: `${deck.masteryPercentage}%` }} />
