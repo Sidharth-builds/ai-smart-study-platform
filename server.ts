@@ -16,6 +16,11 @@ interface MulterRequest extends Request {
   file?: Express.Multer.File;
 }
 
+type RoomUser = {
+  id: string;
+  name: string;
+};
+
 async function startServer() {
   const app = express();
   const httpServer = createServer(app);
@@ -25,6 +30,7 @@ async function startServer() {
       methods: ["GET", "POST"],
     },
   });
+  const roomUsers = new Map<string, RoomUser[]>();
 
   const PORT = 3000;
 
@@ -32,14 +38,37 @@ async function startServer() {
   io.on("connection", (socket) => {
     console.log("A user connected:", socket.id);
 
-    socket.on("join-room", (roomId) => {
+    socket.on("joinRoom", ({ roomId, user }) => {
+      if (!roomId || !user?.id) {
+        return;
+      }
+
       socket.join(roomId);
+      socket.data.roomId = roomId;
+      socket.data.user = user;
+
+      const users = roomUsers.get(roomId) || [];
+      const nextUsers = users.some((existingUser) => existingUser.id === user.id)
+        ? users.map((existingUser) => (existingUser.id === user.id ? user : existingUser))
+        : [...users, user];
+
+      roomUsers.set(roomId, nextUsers);
+      io.to(roomId).emit("roomUsers", nextUsers);
+
       console.log(`User ${socket.id} joined room ${roomId}`);
     });
 
-    socket.on("send-message", (data) => {
-      // Broadcast to everyone in the room except sender (or everyone if using client-side update)
-      io.to(data.roomId).emit("receive-message", data);
+    socket.on("sendMessage", ({ roomId, message, user }) => {
+      if (!roomId || !message || !user?.id) {
+        return;
+      }
+
+      io.to(roomId).emit("message", {
+        roomId,
+        text: message,
+        userId: user.id,
+        userName: user.name,
+      });
     });
 
     socket.on("whiteboard-draw", (data) => {
@@ -47,6 +76,22 @@ async function startServer() {
     });
 
     socket.on("disconnect", () => {
+      const disconnectedRoomId = socket.data.roomId as string | undefined;
+      const disconnectedUser = socket.data.user as RoomUser | undefined;
+
+      if (disconnectedRoomId && disconnectedUser) {
+        const users = roomUsers.get(disconnectedRoomId) || [];
+        const nextUsers = users.filter((user) => user.id !== disconnectedUser.id);
+
+        if (nextUsers.length > 0) {
+          roomUsers.set(disconnectedRoomId, nextUsers);
+        } else {
+          roomUsers.delete(disconnectedRoomId);
+        }
+
+        io.to(disconnectedRoomId).emit("roomUsers", nextUsers);
+      }
+
       console.log("User disconnected:", socket.id);
     });
   });

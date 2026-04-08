@@ -7,22 +7,41 @@ import { Send, Users, FileText, Image as ImageIcon, Pencil, Eraser, Download, Ar
 import { Stage, Layer, Line } from 'react-konva';
 import { motion, AnimatePresence } from 'motion/react';
 
+type RoomUser = {
+  id: string;
+  name: string;
+};
+
 export default function RoomDetail() {
   const { roomId } = useParams<{ roomId: string }>();
   const { user } = useAuth();
   const navigate = useNavigate();
   const [messages, setMessages] = useState<RoomMessage[]>([]);
+  const [users, setUsers] = useState<RoomUser[]>([]);
   const [newMessage, setNewMessage] = useState('');
-  const [socket, setSocket] = useState<Socket | null>(null);
   const [activeTab, setActiveTab] = useState<'chat' | 'whiteboard'>('chat');
   
   // Whiteboard state
   const [lines, setLines] = useState<any[]>([]);
   const isDrawing = useRef(false);
+  const socketRef = useRef<Socket | null>(null);
   const [tool, setTool] = useState('pen');
   const [color, setColor] = useState('#6366f1');
 
-  const scrollRef = useRef<HTMLDivElement>(null);
+  const bottomRef = useRef<HTMLDivElement>(null);
+
+  const appendMessage = (message: RoomMessage) => {
+    setMessages((prev) => {
+      const isDuplicate = prev.some((existingMessage) =>
+        existingMessage.roomId === message.roomId &&
+        existingMessage.userId === message.userId &&
+        existingMessage.text === message.text &&
+        existingMessage.type === message.type
+      );
+
+      return isDuplicate ? prev : [...prev, message];
+    });
+  };
 
   useEffect(() => {
     if (!roomId || !user) return;
@@ -31,28 +50,41 @@ export default function RoomDetail() {
     fetchMessages();
 
     // Initialize Socket
-    const newSocket = io(window.location.origin);
-    setSocket(newSocket);
+    const newSocket = io('https://innercircle-yici.onrender.com');
+    socketRef.current = newSocket;
 
-    newSocket.emit('join-room', roomId);
+    newSocket.emit('joinRoom', {
+      roomId,
+      user: {
+        id: user.uid,
+        name: user.displayName || 'Anonymous',
+      },
+    });
 
-    newSocket.on('receive-message', (message: RoomMessage) => {
-      setMessages(prev => [...prev, message]);
+    newSocket.on('message', (msg: RoomMessage) => {
+      appendMessage({
+        ...msg,
+        type: msg.type || 'text',
+      });
+    });
+
+    newSocket.on('roomUsers', (users: RoomUser[]) => {
+      setUsers(users);
     });
 
     newSocket.on('whiteboard-update', (newLines: any[]) => {
       setLines(newLines);
     });
-
-    return () => {
-      newSocket.disconnect();
-    };
   }, [roomId, user]);
 
   useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
+    return () => {
+      socketRef.current?.disconnect();
+    };
+  }, []);
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
   const fetchMessages = async () => {
@@ -63,24 +95,41 @@ export default function RoomDetail() {
 
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!socket || !newMessage.trim() || !user || !roomId) return;
+    if (!newMessage.trim() || !user || !roomId) return;
+
+    const trimmedMessage = newMessage.trim();
+    const activeSocket = socketRef.current;
+
+    if (!activeSocket) return;
 
     const messageData: Omit<RoomMessage, 'id' | 'createdAt'> = {
       roomId,
       userId: user.uid,
       userName: user.displayName || 'Anonymous',
-      text: newMessage,
+      text: trimmedMessage,
       type: 'text',
     };
 
     try {
+      appendMessage({
+        ...messageData,
+        id: `local-${Date.now()}`,
+        createdAt: new Date(),
+      } as RoomMessage);
+
+      setNewMessage('');
+
+      activeSocket.emit('sendMessage', {
+        roomId,
+        message: trimmedMessage,
+        user: {
+          id: user.uid,
+          name: user.displayName || 'Anonymous',
+        },
+      });
+
       // Save to Firebase
       await saveRoomMessage(messageData);
-      
-      // Emit via Socket
-      socket.emit('send-message', { ...messageData, roomId });
-      
-      setNewMessage('');
     } catch (error) {
       console.error("Error sending message:", error);
     }
@@ -103,8 +152,8 @@ export default function RoomDetail() {
     setLines(lines.concat());
     
     // Sync whiteboard
-    if (socket) {
-      socket.emit('whiteboard-draw', { roomId, lines });
+    if (socketRef.current) {
+      socketRef.current.emit('whiteboard-draw', { roomId, lines });
     }
   };
 
@@ -114,8 +163,8 @@ export default function RoomDetail() {
 
   const clearWhiteboard = () => {
     setLines([]);
-    if (socket) {
-      socket.emit('whiteboard-draw', { roomId, lines: [] });
+    if (socketRef.current) {
+      socketRef.current.emit('whiteboard-draw', { roomId, lines: [] });
     }
   };
 
@@ -164,7 +213,7 @@ export default function RoomDetail() {
         <div className="flex-1 bg-[#0d1425] border border-slate-800 rounded-3xl overflow-hidden flex flex-col shadow-2xl">
           {activeTab === 'chat' ? (
             <>
-              <div ref={scrollRef} className="flex-1 overflow-y-auto p-6 space-y-4">
+              <div className="flex-1 overflow-y-auto p-6 space-y-4">
                 {messages.map((msg, i) => (
                   <div 
                     key={i} 
@@ -182,6 +231,7 @@ export default function RoomDetail() {
                     </div>
                   </div>
                 ))}
+                <div ref={bottomRef} />
               </div>
               <form onSubmit={handleSendMessage} className="p-4 bg-slate-900/50 border-t border-slate-800 flex gap-3">
                 <input 
@@ -266,15 +316,29 @@ export default function RoomDetail() {
               Active Members
             </h3>
             <div className="space-y-3">
-              <div className="flex items-center gap-3 p-2 bg-slate-900/50 rounded-xl border border-slate-800">
-                <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center text-xs font-bold text-white">
-                  {user?.displayName?.[0] || 'U'}
+              {users.length > 0 ? users.map((roomUser) => (
+                <div key={roomUser.id} className="flex items-center gap-3 p-2 bg-slate-900/50 rounded-xl border border-slate-800">
+                  <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center text-xs font-bold text-white">
+                    {roomUser.name?.[0] || 'U'}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm text-white font-medium truncate">
+                      {roomUser.id === user?.uid ? 'You' : roomUser.name}
+                    </p>
+                    <p className="text-[10px] text-emerald-500 font-bold uppercase">Online</p>
+                  </div>
                 </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm text-white font-medium truncate">{user?.displayName || 'You'}</p>
-                  <p className="text-[10px] text-emerald-500 font-bold uppercase">Online</p>
+              )) : (
+                <div className="flex items-center gap-3 p-2 bg-slate-900/50 rounded-xl border border-slate-800">
+                  <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center text-xs font-bold text-white">
+                    {user?.displayName?.[0] || 'U'}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm text-white font-medium truncate">{user?.displayName || 'You'}</p>
+                    <p className="text-[10px] text-emerald-500 font-bold uppercase">Online</p>
+                  </div>
                 </div>
-              </div>
+              )}
             </div>
           </div>
 
