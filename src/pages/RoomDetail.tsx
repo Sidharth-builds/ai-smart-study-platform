@@ -12,6 +12,36 @@ type RoomUser = {
   name: string;
 };
 
+const normalizeRoomUsers = (payload: unknown): RoomUser[] => {
+  const candidateUsers = Array.isArray(payload)
+    ? payload
+    : Array.isArray((payload as { users?: unknown[] } | null)?.users)
+      ? (payload as { users: unknown[] }).users
+      : [];
+
+  return candidateUsers
+    .map((candidate) => {
+      if (!candidate || typeof candidate !== 'object') {
+        return null;
+      }
+
+      const roomUser = candidate as {
+        id?: string;
+        userId?: string;
+        socketId?: string;
+        name?: string;
+        userName?: string;
+        username?: string;
+      };
+
+      const id = roomUser.id || roomUser.userId || roomUser.socketId;
+      const name = roomUser.name || roomUser.userName || roomUser.username || 'Anonymous';
+
+      return id ? { id, name } : null;
+    })
+    .filter((roomUser): roomUser is RoomUser => roomUser !== null);
+};
+
 export default function RoomDetail() {
   const { roomId } = useParams<{ roomId: string }>();
   const { user } = useAuth();
@@ -53,13 +83,19 @@ export default function RoomDetail() {
     const newSocket = io('https://innercircle-yici.onrender.com');
     socketRef.current = newSocket;
 
-    newSocket.emit('joinRoom', {
-      roomId,
-      user: {
-        id: user.uid,
-        name: user.displayName || 'Anonymous',
-      },
-    });
+    const currentUser = {
+      id: user.uid,
+      name: user.displayName || 'Anonymous',
+    };
+
+    const joinRoom = () => {
+      newSocket.emit('joinRoom', {
+        roomId,
+        user: currentUser,
+      });
+    };
+
+    newSocket.on('connect', joinRoom);
 
     newSocket.on('message', (msg: RoomMessage) => {
       appendMessage({
@@ -68,13 +104,24 @@ export default function RoomDetail() {
       });
     });
 
-    newSocket.on('roomUsers', (users: RoomUser[]) => {
-      setUsers(users);
+    newSocket.on('roomUsers', (payload: unknown) => {
+      const nextUsers = normalizeRoomUsers(payload);
+      setUsers(nextUsers);
     });
 
     newSocket.on('whiteboard-update', (newLines: any[]) => {
       setLines(newLines);
     });
+
+    setUsers([currentUser]);
+
+    return () => {
+      newSocket.off('connect', joinRoom);
+      newSocket.disconnect();
+      if (socketRef.current === newSocket) {
+        socketRef.current = null;
+      }
+    };
   }, [roomId, user]);
 
   useEffect(() => {
