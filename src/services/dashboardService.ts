@@ -4,6 +4,12 @@ import { COLLECTIONS, StudySession } from '../lib/firebaseService';
 
 const LEGACY_FLASHCARD_COLLECTION = 'Flashcards';
 
+type FlashcardLikeDoc = {
+  id: string;
+  mastered?: boolean;
+  cards?: Array<{ mastered?: boolean }>;
+};
+
 // Helper function to get start of week (Monday)
 function getStartOfWeek(date: Date): Date {
   const d = new Date(date);
@@ -30,50 +36,64 @@ export const getStudyHours = async (userId: string): Promise<number> => {
   return sessions.reduce((sum, session) => sum + (session.duration || 0), 0);
 };
 
-// Get mastered cards count
-export const getMasteredCards = async (userId: string): Promise<number> => {
-  const primaryQuery = query(
-    collection(db, COLLECTIONS.FLASHCARDS),
-    where('userId', '==', userId),
-    where('mastered', '==', true)
+const getFlashcardDocuments = async (userId: string): Promise<FlashcardLikeDoc[]> => {
+  const collectionNames = Array.from(new Set([COLLECTIONS.FLASHCARDS, LEGACY_FLASHCARD_COLLECTION]));
+
+  const snapshots = await Promise.all(
+    collectionNames.map(async (collectionName) => {
+      try {
+        return await getDocs(query(
+          collection(db, collectionName),
+          where('userId', '==', userId),
+        ));
+      } catch (error) {
+        console.warn(`[Firestore] Flashcard query failed for ${collectionName}:`, error);
+        return null;
+      }
+    }),
   );
 
-  try {
-    const querySnapshot = await getDocs(primaryQuery);
-    console.log("Fetched data:", querySnapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() })));
-    return querySnapshot.size;
-  } catch (error) {
-    console.warn('[Firestore] Mastered cards query failed, falling back:', error);
-    const fallbackSnapshot = await getDocs(query(
-      collection(db, LEGACY_FLASHCARD_COLLECTION),
-      where('userId', '==', userId),
-      where('mastered', '==', true),
-    ));
-    console.log("Fetched data:", fallbackSnapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() })));
-    return fallbackSnapshot.size;
-  }
+  return snapshots
+    .filter((snapshot): snapshot is NonNullable<typeof snapshot> => snapshot !== null)
+    .flatMap((snapshot) => snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() } as FlashcardLikeDoc)));
+};
+
+const getFlashcardCounts = (docs: FlashcardLikeDoc[]) => {
+  return docs.reduce(
+    (totals, doc) => {
+      if (Array.isArray(doc.cards)) {
+        const totalCards = doc.cards.length;
+        const masteredCards = doc.cards.filter((card) => Boolean(card.mastered)).length;
+
+        totals.total += totalCards;
+        totals.mastered += masteredCards;
+        return totals;
+      }
+
+      totals.total += 1;
+      if (doc.mastered) {
+        totals.mastered += 1;
+      }
+      return totals;
+    },
+    { total: 0, mastered: 0 },
+  );
+};
+
+// Get mastered cards count
+export const getMasteredCards = async (userId: string): Promise<number> => {
+  const docs = await getFlashcardDocuments(userId);
+  const counts = getFlashcardCounts(docs);
+  console.log("Fetched data:", docs);
+  return counts.mastered;
 };
 
 // Get total cards count
 export const getTotalCards = async (userId: string): Promise<number> => {
-  const primaryQuery = query(
-    collection(db, COLLECTIONS.FLASHCARDS),
-    where('userId', '==', userId)
-  );
-
-  try {
-    const querySnapshot = await getDocs(primaryQuery);
-    console.log("Fetched data:", querySnapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() })));
-    return querySnapshot.size;
-  } catch (error) {
-    console.warn('[Firestore] Total cards query failed, falling back:', error);
-    const fallbackSnapshot = await getDocs(query(
-      collection(db, LEGACY_FLASHCARD_COLLECTION),
-      where('userId', '==', userId),
-    ));
-    console.log("Fetched data:", fallbackSnapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() })));
-    return fallbackSnapshot.size;
-  }
+  const docs = await getFlashcardDocuments(userId);
+  const counts = getFlashcardCounts(docs);
+  console.log("Fetched data:", docs);
+  return counts.total;
 };
 
 // Get exam readiness percentage
