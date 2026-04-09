@@ -198,7 +198,7 @@ export default function RoomDetail() {
     console.log('Socket URL:', socketServerUrl);
 
     const socket = io(socketServerUrl, {
-      transports: ['websocket'],
+      transports: ['websocket', 'polling'],
       reconnection: true,
       withCredentials: true,
     });
@@ -207,10 +207,14 @@ export default function RoomDetail() {
     console.log('Connected:', socket.connected);
 
     socket.on('connect', () => {
-      console.log('Connected:', socket.connected);
+      console.log('CONNECTED:', socket.id);
     });
 
-    socket.on('receiveMessage', (newMessage: RoomMessage) => {
+    socket.on('disconnect', () => {
+      console.log('DISCONNECTED');
+    });
+
+    socket.on('receive-message', (newMessage: RoomMessage) => {
       setMessages((prev) => [...prev, { ...newMessage, type: newMessage.type || 'text' }]);
     });
 
@@ -232,7 +236,8 @@ export default function RoomDetail() {
 
     return () => {
       socket.off('connect');
-      socket.off('receiveMessage');
+      socket.off('disconnect');
+      socket.off('receive-message');
       socket.off('room-users');
       socket.off('user-joined');
       socket.off('newResource');

@@ -166,7 +166,7 @@ async function startServer() {
         timestamp: new Date(),
       };
 
-      io.to(roomId).emit("receiveMessage", msg);
+      io.to(roomId).emit("receive-message", msg);
     });
 
     socket.on("send-resource", ({ roomId, resource }: { roomId?: string; resource?: SharedResource }) => {
