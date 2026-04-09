@@ -183,6 +183,7 @@ export default function RoomDetail() {
   // Whiteboard state
   const [lines, setLines] = useState<any[]>([]);
   const isDrawing = useRef(false);
+  const [socket, setSocket] = useState<Socket | null>(null);
   const socketRef = useRef<Socket | null>(null);
   const [tool, setTool] = useState('pen');
   const [color, setColor] = useState('#6366f1');
@@ -202,9 +203,18 @@ export default function RoomDetail() {
       reconnection: true,
       withCredentials: true,
     });
+    setSocket(socket);
     socketRef.current = socket;
 
-    console.log('Connected:', socket.connected);
+    return () => {
+      setSocket(null);
+      socket.disconnect();
+      socketRef.current = null;
+    };
+  }, [socketServerUrl]);
+
+  useEffect(() => {
+    if (!socket) return;
 
     socket.on('connect', () => {
       console.log('CONNECTED:', socket.id);
@@ -214,12 +224,12 @@ export default function RoomDetail() {
       console.log('DISCONNECTED');
     });
 
-    socket.on('receive-message', (newMessage: RoomMessage) => {
-      setMessages((prev) => [...prev, { ...newMessage, type: newMessage.type || 'text' }]);
+    socket.on('receive-message', (message: RoomMessage) => {
+      setMessages((prev) => [...prev, { ...message, type: message.type || 'text' }]);
     });
 
-    socket.on('room-users', (payload: unknown) => {
-      setUsers(normalizeRoomUsers(payload));
+    socket.on('room-users', (roomUsers: unknown) => {
+      setUsers(normalizeRoomUsers(roomUsers));
     });
 
     socket.on('user-joined', (payload: unknown) => {
@@ -242,10 +252,8 @@ export default function RoomDetail() {
       socket.off('user-joined');
       socket.off('newResource');
       socket.off('whiteboard-update');
-      socket.disconnect();
-      socketRef.current = null;
     };
-  }, [socketServerUrl]);
+  }, [socket]);
 
   useEffect(() => {
     if (!roomId) return;
@@ -294,23 +302,22 @@ export default function RoomDetail() {
   }, [user]);
 
   useEffect(() => {
-    if (!socketRef.current || !roomId || !user) return;
+    if (!socket || !roomId || !user) return;
 
-    const currentSocket = socketRef.current;
     const currentUser = {
       id: user.uid,
       name: user.displayName || 'Anonymous',
     };
 
-    currentSocket.emit('join-room', {
+    socket.emit('join-room', {
       roomId,
       user: currentUser,
     });
 
     return () => {
-      currentSocket.emit('leave-room', { roomId });
+      socket.emit('leave-room', { roomId });
     };
-  }, [roomId, user?.uid, user?.displayName]);
+  }, [socket, roomId, user?.uid, user?.displayName]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
