@@ -199,6 +199,7 @@ export default function RoomDetail() {
 
     const socket = io(socketServerUrl, {
       transports: ['websocket'],
+      reconnection: true,
       withCredentials: true,
     });
     socketRef.current = socket;
