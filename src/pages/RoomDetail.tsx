@@ -34,7 +34,8 @@ type SavedFlashcard = {
 
 type SharedResource = {
   type: 'image' | 'pdf' | 'link';
-  url: string;
+  url?: string;
+  file?: string;
   name?: string;
   user?: {
     id: string;
@@ -134,6 +135,7 @@ export default function RoomDetail() {
   const [resourceType, setResourceType] = useState<'link' | 'image' | 'pdf'>('link');
   const [resourceUrl, setResourceUrl] = useState('');
   const [resourceName, setResourceName] = useState('');
+  const [resourceFile, setResourceFile] = useState<File | null>(null);
   const [activeTab, setActiveTab] = useState<'chat' | 'whiteboard'>('chat');
   
   // Whiteboard state
@@ -234,7 +236,7 @@ export default function RoomDetail() {
   };
 
   const emitResource = (resource: SharedResource) => {
-    if (!socketRef.current || !roomId || !resource.url.trim()) {
+    if (!socketRef.current || !roomId || (!resource.url?.trim() && !resource.file?.trim())) {
       return;
     }
 
@@ -246,6 +248,21 @@ export default function RoomDetail() {
       },
     });
   };
+
+  const convertFileToDataUrl = (file: File) =>
+    new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        if (typeof reader.result === 'string') {
+          resolve(reader.result);
+          return;
+        }
+
+        reject(new Error('Failed to read file'));
+      };
+      reader.onerror = () => reject(reader.error ?? new Error('Failed to read file'));
+      reader.readAsDataURL(file);
+    });
 
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -345,22 +362,40 @@ export default function RoomDetail() {
     }
   };
 
-  const handleSendResource = (e: React.FormEvent) => {
+  const handleSendResource = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    const trimmedUrl = resourceUrl.trim();
-    if (!trimmedUrl) {
-      return;
+    try {
+      if (resourceType === 'link') {
+        const trimmedUrl = resourceUrl.trim();
+        if (!trimmedUrl) {
+          return;
+        }
+
+        emitResource({
+          type: resourceType,
+          url: trimmedUrl,
+          name: resourceName.trim() || trimmedUrl,
+        });
+      } else {
+        if (!resourceFile) {
+          return;
+        }
+
+        const fileData = await convertFileToDataUrl(resourceFile);
+        emitResource({
+          type: resourceType,
+          file: fileData,
+          name: resourceName.trim() || resourceFile.name,
+        });
+      }
+
+      setResourceUrl('');
+      setResourceName('');
+      setResourceFile(null);
+    } catch (error) {
+      console.error('Error sharing resource:', error);
     }
-
-    emitResource({
-      type: resourceType,
-      url: trimmedUrl,
-      name: resourceName.trim() || trimmedUrl,
-    });
-
-    setResourceUrl('');
-    setResourceName('');
   };
 
   // Whiteboard handlers
@@ -414,10 +449,6 @@ export default function RoomDetail() {
       socketRef.current.emit('whiteboard-draw', { roomId, lines: [] });
     }
   };
-
-  const uniqueUsers = users.filter(
-    (roomUser, index, self) => index === self.findIndex((candidate) => candidate.id === roomUser.id),
-  );
 
   return (
     <div className="h-[calc(100vh-120px)] flex flex-col gap-6">
@@ -610,8 +641,8 @@ export default function RoomDetail() {
               Active Members
             </h3>
             <div className="space-y-3">
-              {uniqueUsers.length > 0 ? uniqueUsers.map((roomUser) => (
-                <div key={roomUser.id} className="flex items-center gap-3 p-2 bg-slate-900/50 rounded-xl border border-slate-800">
+              {users.length > 0 ? users.map((roomUser) => (
+                <div key={roomUser.socketId} className="flex items-center gap-3 p-2 bg-slate-900/50 rounded-xl border border-slate-800">
                   <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center text-xs font-bold text-white">
                     {roomUser.name?.[0] || 'U'}
                   </div>
@@ -647,7 +678,12 @@ export default function RoomDetail() {
                   <button
                     key={type}
                     type="button"
-                    onClick={() => setResourceType(type)}
+                    onClick={() => {
+                      setResourceType(type);
+                      setResourceUrl('');
+                      setResourceName('');
+                      setResourceFile(null);
+                    }}
                     className={`rounded-xl px-3 py-2 text-xs font-bold uppercase transition-all ${
                       resourceType === type ? 'bg-emerald-600 text-white' : 'bg-slate-900 text-slate-400 hover:bg-slate-800'
                     }`}
@@ -658,13 +694,27 @@ export default function RoomDetail() {
               </div>
 
               <form onSubmit={handleSendResource} className="space-y-3">
-                <input
-                  type="url"
-                  value={resourceUrl}
-                  onChange={(e) => setResourceUrl(e.target.value)}
-                  placeholder={resourceType === 'image' ? 'Image URL' : resourceType === 'pdf' ? 'PDF URL' : 'Link URL'}
-                  className="w-full rounded-xl border border-slate-800 bg-slate-900 px-4 py-2.5 text-sm text-white focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
-                />
+                {resourceType === 'link' ? (
+                  <input
+                    type="url"
+                    value={resourceUrl}
+                    onChange={(e) => setResourceUrl(e.target.value)}
+                    placeholder="Link URL"
+                    className="w-full rounded-xl border border-slate-800 bg-slate-900 px-4 py-2.5 text-sm text-white focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
+                  />
+                ) : (
+                  <div className="space-y-2">
+                    <input
+                      type="file"
+                      accept={resourceType === 'image' ? 'image/*' : 'application/pdf'}
+                      onChange={(e) => setResourceFile(e.target.files?.[0] ?? null)}
+                      className="w-full rounded-xl border border-slate-800 bg-slate-900 px-4 py-2.5 text-sm text-slate-300 file:mr-4 file:rounded-lg file:border-0 file:bg-emerald-600 file:px-3 file:py-2 file:text-sm file:font-bold file:text-white"
+                    />
+                    {resourceFile && (
+                      <p className="text-xs text-slate-400">Selected: {resourceFile.name}</p>
+                    )}
+                  </div>
+                )}
                 <input
                   type="text"
                   value={resourceName}
@@ -674,7 +724,7 @@ export default function RoomDetail() {
                 />
                 <button
                   type="submit"
-                  disabled={!resourceUrl.trim()}
+                  disabled={resourceType === 'link' ? !resourceUrl.trim() : !resourceFile}
                   className="w-full rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-bold text-white transition-all hover:bg-emerald-500 disabled:opacity-50"
                 >
                   Share Resource
@@ -683,7 +733,7 @@ export default function RoomDetail() {
 
               <div className="space-y-3">
                 {resources.length > 0 ? resources.map((resource, index) => (
-                  <div key={`${resource.url}-${index}`} className="rounded-2xl border border-slate-800 bg-slate-900/50 p-3">
+                  <div key={`${resource.file || resource.url}-${index}`} className="rounded-2xl border border-slate-800 bg-slate-900/50 p-3">
                     <div className="mb-2 flex items-center gap-2 text-[10px] font-bold uppercase tracking-wide text-slate-500">
                       {resource.type === 'image' ? <ImageIcon className="w-3.5 h-3.5" /> : resource.type === 'pdf' ? <FileText className="w-3.5 h-3.5" /> : <LinkIcon className="w-3.5 h-3.5" />}
                       {resource.type}
@@ -692,13 +742,13 @@ export default function RoomDetail() {
                     </div>
 
                     {resource.type === 'image' ? (
-                      <a href={resource.url} target="_blank" rel="noopener noreferrer" className="block">
-                        <img src={resource.url} alt={resource.name || 'Shared image'} className="max-h-44 w-full rounded-xl object-cover" />
+                      <a href={resource.file} target="_blank" rel="noopener noreferrer" className="block">
+                        <img src={resource.file} alt={resource.name || 'Shared image'} className="max-h-44 w-full rounded-xl object-cover" />
                       </a>
                     ) : resource.type === 'pdf' ? (
-                      <a href={resource.url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 text-sm text-sky-300 underline underline-offset-2 break-all">
+                      <a href={resource.file} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 text-sm text-sky-300 underline underline-offset-2 break-all">
                         <FileText className="w-4 h-4" />
-                        {resource.name || resource.url}
+                        {resource.name || 'Shared PDF'}
                       </a>
                     ) : (
                       <a href={resource.url} target="_blank" rel="noopener noreferrer" className="text-sm text-sky-300 underline underline-offset-2 break-all">
@@ -709,7 +759,7 @@ export default function RoomDetail() {
                 )) : (
                   <div className="p-4 bg-slate-900/50 border border-slate-800 border-dashed rounded-2xl text-center">
                     <FileText className="w-8 h-8 text-slate-700 mx-auto mb-2" />
-                    <p className="text-xs text-slate-500">No shared resources yet. Add a link, image URL, or PDF URL to share it with the room.</p>
+                    <p className="text-xs text-slate-500">No shared resources yet. Upload an image or PDF, or add a link to share it with the room.</p>
                   </div>
                 )}
               </div>

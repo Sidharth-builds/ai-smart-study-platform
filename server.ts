@@ -20,7 +20,6 @@ type RoomUser = {
   id: string;
   name: string;
   socketId: string;
-  socketIds: string[];
   roomId: string;
 };
 
@@ -46,7 +45,8 @@ type ChatMessage =
 
 type SharedResource = {
   type: "image" | "pdf" | "link";
-  url: string;
+  url?: string;
+  file?: string;
   name?: string;
   user?: ChatUser;
   timestamp?: Date;
@@ -55,38 +55,23 @@ type SharedResource = {
 const users: RoomUser[] = [];
 
 function addUser(socketId: string, user: ChatUser, roomId: string) {
-  const existing = users.find((roomUser) => roomUser.id === user.id && roomUser.roomId === roomId);
-  if (existing) {
-    if (!existing.socketIds.includes(socketId)) {
-      existing.socketIds.push(socketId);
-    }
-    existing.socketId = existing.socketIds[0];
-    existing.name = user.name;
-    return existing;
-  }
-
-  const newUser = { socketId, socketIds: [socketId], ...user, roomId };
+  const newUser = {
+    socketId,
+    id: user.id,
+    name: user.name,
+    roomId,
+  };
   users.push(newUser);
   return newUser;
 }
 
 function removeUser(socketId: string) {
-  const roomUser = users.find((candidate) => candidate.socketIds.includes(socketId));
-  if (!roomUser) {
-    return undefined;
+  const index = users.findIndex((roomUser) => roomUser.socketId === socketId);
+  if (index !== -1) {
+    return users.splice(index, 1)[0];
   }
 
-  roomUser.socketIds = roomUser.socketIds.filter((candidateSocketId) => candidateSocketId !== socketId);
-  roomUser.socketId = roomUser.socketIds[0] || roomUser.socketId;
-
-  if (roomUser.socketIds.length === 0) {
-    const index = users.findIndex((candidate) => candidate.id === roomUser.id && candidate.roomId === roomUser.roomId);
-    if (index !== -1) {
-      return users.splice(index, 1)[0];
-    }
-  }
-
-  return roomUser;
+  return undefined;
 }
 
 function getUsersInRoom(roomId: string) {
@@ -145,7 +130,7 @@ async function startServer() {
     });
 
     socket.on("sendResource", ({ roomId, resource }: { roomId?: string; resource?: SharedResource }) => {
-      if (!roomId || !resource?.type || !resource?.url) {
+      if (!roomId || !resource?.type || (!resource.url && !resource.file)) {
         return;
       }
 
