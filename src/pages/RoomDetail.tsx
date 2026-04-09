@@ -153,6 +153,10 @@ export default function RoomDetail() {
     });
     socketRef.current = socket;
 
+    socket.on('receiveMessage', (newMessage: RoomMessage) => {
+      setMessages((prev) => [...prev, { ...newMessage, type: newMessage.type || 'text' }]);
+    });
+
     socket.on('message', (msg: RoomMessage) => {
       setMessages((prev) => [...prev, { ...msg, type: msg.type || 'text' }]);
     });
@@ -170,6 +174,7 @@ export default function RoomDetail() {
     });
 
     return () => {
+      socket.off('receiveMessage');
       socket.off('message');
       socket.off('roomUsers');
       socket.off('newResource');
