@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "node .\\node_modules\\tsx\\dist\\cli.mjs server.ts",
+    "start": "tsx server.ts",
     "build": "vite build",
     "preview": "npx vite preview",
     "clean": "powershell -NoProfile -Command \"if (Test-Path dist) { Remove-Item -Recurse -Force dist }\"",
