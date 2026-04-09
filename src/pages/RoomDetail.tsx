@@ -121,6 +121,48 @@ const formatMessage = (text: string) => {
   });
 };
 
+const getMessageTimestamp = (message: RoomMessage) => {
+  const candidate = (message as RoomMessage & { timestamp?: Date | string | { toMillis?: () => number } }).timestamp ?? message.createdAt;
+  if (!candidate) {
+    return '';
+  }
+
+  if (typeof candidate === 'object' && 'toMillis' in candidate && typeof candidate.toMillis === 'function') {
+    return String(candidate.toMillis());
+  }
+
+  return String(candidate instanceof Date ? candidate.getTime() : candidate);
+};
+
+const getMessageKey = (message: RoomMessage) =>
+  JSON.stringify({
+    roomId: message.roomId,
+    userId: message.userId,
+    userName: message.userName,
+    type: message.type,
+    text: message.text,
+    timestamp: getMessageTimestamp(message),
+  });
+
+const mergeMessages = (current: RoomMessage[], incoming: RoomMessage[]) => {
+  const seen = new Set(current.map(getMessageKey));
+  const merged = [...current];
+
+  incoming.forEach((message) => {
+    const key = getMessageKey(message);
+    if (!seen.has(key)) {
+      seen.add(key);
+      merged.push(message);
+    }
+  });
+
+  return merged.sort((a, b) => {
+    const left = Number(getMessageTimestamp(a)) || 0;
+    const right = Number(getMessageTimestamp(b)) || 0;
+    return left - right;
+  });
+};
+
 export default function RoomDetail() {
   const { roomId } = useParams<{ roomId: string }>();
   const { user } = useAuth();
@@ -187,9 +229,27 @@ export default function RoomDetail() {
   useEffect(() => {
     if (!roomId) return;
 
+    let isActive = true;
+
     setMessages([]);
     setResources([]);
-    fetchMessages();
+
+    const loadMessages = async () => {
+      const historicalMessages = await getRoomMessages(roomId);
+      if (!isActive) {
+        return;
+      }
+
+      setMessages((prev) => mergeMessages(prev, historicalMessages));
+    };
+
+    loadMessages().catch((error) => {
+      console.error('Error loading room messages:', error);
+    });
+
+    return () => {
+      isActive = false;
+    };
   }, [roomId]);
 
   useEffect(() => {
@@ -215,30 +275,25 @@ export default function RoomDetail() {
   useEffect(() => {
     if (!socketRef.current || !roomId || !user) return;
 
+    const currentSocket = socketRef.current;
     const currentUser = {
       id: user.uid,
       name: user.displayName || 'Anonymous',
     };
 
-    socketRef.current.emit('joinRoom', {
+    currentSocket.emit('joinRoom', {
       roomId,
       user: currentUser,
     });
 
     return () => {
-      socketRef.current?.emit('leaveRoom', { roomId });
+      currentSocket.emit('leaveRoom', { roomId });
     };
-  }, [roomId, user]);
+  }, [roomId, user?.uid, user?.displayName]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
-
-  const fetchMessages = async () => {
-    if (!roomId) return;
-    const historicalMessages = await getRoomMessages(roomId);
-    setMessages(historicalMessages);
-  };
 
   const emitResource = (resource: SharedResource) => {
     if (!socketRef.current || !roomId || (!resource.url?.trim() && !resource.file?.trim())) {

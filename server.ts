@@ -55,6 +55,11 @@ type SharedResource = {
 const users: RoomUser[] = [];
 
 function addUser(socketId: string, user: ChatUser, roomId: string) {
+  const existingIndex = users.findIndex((roomUser) => roomUser.socketId === socketId);
+  if (existingIndex !== -1) {
+    users.splice(existingIndex, 1);
+  }
+
   const newUser = {
     socketId,
     id: user.id,
