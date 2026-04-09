@@ -1,4 +1,15 @@
-import type { NextApiRequest, NextApiResponse } from 'next';
+type NextApiRequest = {
+  method?: string;
+  body?: {
+    text?: unknown;
+  };
+};
+
+type NextApiResponse<T> = {
+  status: (code: number) => {
+    json: (body: T) => void;
+  };
+};
 
 type Topic = { name: string; count: number };
 type ResponseBody = {

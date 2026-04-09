@@ -2,14 +2,45 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { io, Socket } from 'socket.io-client';
 import { useAuth } from '../lib/AuthContext';
-import { getRoomMessages, saveRoomMessage, RoomMessage } from '../lib/firebaseService';
-import { Send, Users, FileText, Image as ImageIcon, Pencil, Eraser, Download, ArrowLeft, MessageSquare, Share2 } from 'lucide-react';
+import { getRoomMessages, saveRoomMessage, RoomMessage, getUserFlashcards } from '../lib/firebaseService';
+import { Send, Users, FileText, Pencil, Eraser, Download, ArrowLeft, MessageSquare, Share2, Layers, X, Link as LinkIcon, Image as ImageIcon } from 'lucide-react';
 import { Stage, Layer, Line } from 'react-konva';
-import { motion, AnimatePresence } from 'motion/react';
 
 type RoomUser = {
   id: string;
   name: string;
+  socketId: string;
+};
+
+type FlashcardMessage = {
+  type: 'flashcard';
+  question: string;
+  answer: string;
+};
+
+type FlashcardsMessage = {
+  type: 'flashcards';
+  cards: Array<{
+    question: string;
+    answer: string;
+  }>;
+};
+
+type SavedFlashcard = {
+  id: string;
+  question: string;
+  answer: string;
+};
+
+type SharedResource = {
+  type: 'image' | 'pdf' | 'link';
+  url: string;
+  name?: string;
+  user?: {
+    id: string;
+    name: string;
+  };
+  timestamp?: Date | string;
 };
 
 const normalizeRoomUsers = (payload: unknown): RoomUser[] => {
@@ -34,12 +65,59 @@ const normalizeRoomUsers = (payload: unknown): RoomUser[] => {
         username?: string;
       };
 
-      const id = roomUser.id || roomUser.userId || roomUser.socketId;
+      const socketId = roomUser.socketId || roomUser.id || roomUser.userId;
+      const id = roomUser.id || roomUser.userId || socketId;
       const name = roomUser.name || roomUser.userName || roomUser.username || 'Anonymous';
 
-      return id ? { id, name } : null;
+      return id && socketId ? { id, name, socketId } : null;
     })
     .filter((roomUser): roomUser is RoomUser => roomUser !== null);
+};
+
+const socketServerUrl = import.meta.env.VITE_SOCKET_SERVER_URL || window.location.origin;
+
+const isFlashcardMessage = (value: RoomMessage['text']): value is FlashcardMessage =>
+  Boolean(
+    value &&
+    typeof value === 'object' &&
+    'type' in value &&
+    value.type === 'flashcard' &&
+    'question' in value &&
+    'answer' in value,
+  );
+
+const isFlashcardsMessage = (value: RoomMessage['text']): value is FlashcardsMessage =>
+  Boolean(
+    value &&
+    typeof value === 'object' &&
+    'type' in value &&
+    value.type === 'flashcards' &&
+    'cards' in value &&
+    Array.isArray(value.cards),
+  );
+
+const getUrlsFromText = (text: string) => text.match(/https?:\/\/[^\s]+/g) ?? [];
+
+const formatMessage = (text: string) => {
+  const urlRegex = /(https?:\/\/[^\s]+)/g;
+
+  return text.split(urlRegex).map((part, index) => {
+    if (part.match(urlRegex)) {
+      return (
+        <a
+          key={`${part}-${index}`}
+          href={part}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-sky-300 underline underline-offset-2 break-all"
+        >
+          {part}
+        </a>
+      );
+    }
+
+    return <React.Fragment key={`${part}-${index}`}>{part}</React.Fragment>;
+  });
 };
 
 export default function RoomDetail() {
@@ -48,7 +126,14 @@ export default function RoomDetail() {
   const navigate = useNavigate();
   const [messages, setMessages] = useState<RoomMessage[]>([]);
   const [users, setUsers] = useState<RoomUser[]>([]);
+  const [resources, setResources] = useState<SharedResource[]>([]);
   const [newMessage, setNewMessage] = useState('');
+  const [savedFlashcards, setSavedFlashcards] = useState<SavedFlashcard[]>([]);
+  const [showFlashcardPicker, setShowFlashcardPicker] = useState(false);
+  const [selectedFlashcardIds, setSelectedFlashcardIds] = useState<string[]>([]);
+  const [resourceType, setResourceType] = useState<'link' | 'image' | 'pdf'>('link');
+  const [resourceUrl, setResourceUrl] = useState('');
+  const [resourceName, setResourceName] = useState('');
   const [activeTab, setActiveTab] = useState<'chat' | 'whiteboard'>('chat');
   
   // Whiteboard state
@@ -60,75 +145,83 @@ export default function RoomDetail() {
 
   const bottomRef = useRef<HTMLDivElement>(null);
 
-  const appendMessage = (message: RoomMessage) => {
-    setMessages((prev) => {
-      const isDuplicate = prev.some((existingMessage) =>
-        existingMessage.roomId === message.roomId &&
-        existingMessage.userId === message.userId &&
-        existingMessage.text === message.text &&
-        existingMessage.type === message.type
-      );
-
-      return isDuplicate ? prev : [...prev, message];
+  useEffect(() => {
+    const socket = io(socketServerUrl, {
+      transports: ['websocket', 'polling'],
     });
-  };
+    socketRef.current = socket;
+
+    socket.on('message', (msg: RoomMessage) => {
+      setMessages((prev) => [...prev, { ...msg, type: msg.type || 'text' }]);
+    });
+
+    socket.on('roomUsers', (payload: unknown) => {
+      setUsers(normalizeRoomUsers(payload));
+    });
+
+    socket.on('newResource', (resource: SharedResource) => {
+      setResources((prev) => [...prev, resource]);
+    });
+
+    socket.on('whiteboard-update', (newLines: any[]) => {
+      setLines(newLines);
+    });
+
+    return () => {
+      socket.off('message');
+      socket.off('roomUsers');
+      socket.off('newResource');
+      socket.off('whiteboard-update');
+      socket.disconnect();
+      socketRef.current = null;
+    };
+  }, []);
 
   useEffect(() => {
-    if (!roomId || !user) return;
+    if (!roomId) return;
 
-    // Fetch historical messages
+    setMessages([]);
+    setResources([]);
     fetchMessages();
+  }, [roomId]);
 
-    // Initialize Socket
-    const newSocket = io('https://innercircle-yici.onrender.com');
-    socketRef.current = newSocket;
+  useEffect(() => {
+    if (!user) return;
+
+    getUserFlashcards(user.uid)
+      .then((flashcards) => {
+        setSavedFlashcards(
+          flashcards
+            .filter((flashcard) => flashcard.id)
+            .map((flashcard) => ({
+              id: flashcard.id as string,
+              question: flashcard.question,
+              answer: flashcard.answer,
+            })),
+        );
+      })
+      .catch((error) => {
+        console.error('Error fetching shareable flashcards:', error);
+      });
+  }, [user]);
+
+  useEffect(() => {
+    if (!socketRef.current || !roomId || !user) return;
 
     const currentUser = {
       id: user.uid,
       name: user.displayName || 'Anonymous',
     };
 
-    const joinRoom = () => {
-      newSocket.emit('joinRoom', {
-        roomId,
-        user: currentUser,
-      });
-    };
-
-    newSocket.on('connect', joinRoom);
-
-    newSocket.on('message', (msg: RoomMessage) => {
-      appendMessage({
-        ...msg,
-        type: msg.type || 'text',
-      });
+    socketRef.current.emit('joinRoom', {
+      roomId,
+      user: currentUser,
     });
-
-    newSocket.on('roomUsers', (payload: unknown) => {
-      const nextUsers = normalizeRoomUsers(payload);
-      setUsers(nextUsers);
-    });
-
-    newSocket.on('whiteboard-update', (newLines: any[]) => {
-      setLines(newLines);
-    });
-
-    setUsers([currentUser]);
 
     return () => {
-      newSocket.off('connect', joinRoom);
-      newSocket.disconnect();
-      if (socketRef.current === newSocket) {
-        socketRef.current = null;
-      }
+      socketRef.current?.emit('leaveRoom', { roomId });
     };
   }, [roomId, user]);
-
-  useEffect(() => {
-    return () => {
-      socketRef.current?.disconnect();
-    };
-  }, []);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -140,14 +233,26 @@ export default function RoomDetail() {
     setMessages(historicalMessages);
   };
 
+  const emitResource = (resource: SharedResource) => {
+    if (!socketRef.current || !roomId || !resource.url.trim()) {
+      return;
+    }
+
+    socketRef.current.emit('sendResource', {
+      roomId,
+      resource: {
+        ...resource,
+        user: user ? { id: user.uid, name: user.displayName || 'Anonymous' } : resource.user,
+      },
+    });
+  };
+
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newMessage.trim() || !user || !roomId) return;
 
     const trimmedMessage = newMessage.trim();
-    const activeSocket = socketRef.current;
-
-    if (!activeSocket) return;
+    if (!socketRef.current) return;
 
     const messageData: Omit<RoomMessage, 'id' | 'createdAt'> = {
       roomId,
@@ -158,21 +263,23 @@ export default function RoomDetail() {
     };
 
     try {
-      appendMessage({
-        ...messageData,
-        id: `local-${Date.now()}`,
-        createdAt: new Date(),
-      } as RoomMessage);
-
-      setNewMessage('');
-
-      activeSocket.emit('sendMessage', {
+      socketRef.current.emit('sendMessage', {
         roomId,
         message: trimmedMessage,
         user: {
           id: user.uid,
           name: user.displayName || 'Anonymous',
         },
+      });
+
+      setNewMessage('');
+
+      getUrlsFromText(trimmedMessage).forEach((url) => {
+        emitResource({
+          type: 'link',
+          url,
+          name: url,
+        });
       });
 
       // Save to Firebase
@@ -182,29 +289,122 @@ export default function RoomDetail() {
     }
   };
 
+  const toggleFlashcardSelection = (flashcardId: string) => {
+    setSelectedFlashcardIds((prev) =>
+      prev.includes(flashcardId)
+        ? prev.filter((id) => id !== flashcardId)
+        : [...prev, flashcardId],
+    );
+  };
+
+  const handleShareFlashcards = async () => {
+    if (!socketRef.current || !roomId || !user) return;
+
+    const selectedCards = savedFlashcards.filter((flashcard) => selectedFlashcardIds.includes(flashcard.id));
+    if (selectedCards.length === 0) {
+      return;
+    }
+
+    const flashcardMessage: FlashcardMessage | FlashcardsMessage = selectedCards.length === 1
+      ? {
+          type: 'flashcard',
+          question: selectedCards[0].question,
+          answer: selectedCards[0].answer,
+        }
+      : {
+          type: 'flashcards',
+          cards: selectedCards.map((flashcard) => ({
+            question: flashcard.question,
+            answer: flashcard.answer,
+          })),
+        };
+
+    const messageData: Omit<RoomMessage, 'id' | 'createdAt'> = {
+      roomId,
+      userId: user.uid,
+      userName: user.displayName || 'Anonymous',
+      text: flashcardMessage,
+      type: flashcardMessage.type,
+    };
+
+    try {
+      socketRef.current.emit('sendMessage', {
+        roomId,
+        message: flashcardMessage,
+        user: {
+          id: user.uid,
+          name: user.displayName || 'Anonymous',
+        },
+      });
+
+      setShowFlashcardPicker(false);
+      setSelectedFlashcardIds([]);
+      await saveRoomMessage(messageData);
+    } catch (error) {
+      console.error('Error sharing flashcard:', error);
+    }
+  };
+
+  const handleSendResource = (e: React.FormEvent) => {
+    e.preventDefault();
+
+    const trimmedUrl = resourceUrl.trim();
+    if (!trimmedUrl) {
+      return;
+    }
+
+    emitResource({
+      type: resourceType,
+      url: trimmedUrl,
+      name: resourceName.trim() || trimmedUrl,
+    });
+
+    setResourceUrl('');
+    setResourceName('');
+  };
+
   // Whiteboard handlers
   const handleMouseDown = (e: any) => {
     isDrawing.current = true;
     const pos = e.target.getStage().getPointerPosition();
-    setLines([...lines, { tool, color, points: [pos.x, pos.y] }]);
+    if (!pos) return;
+
+    setLines((prev) => [...prev, { tool, color, points: [pos.x, pos.y] }]);
   };
 
   const handleMouseMove = (e: any) => {
     if (!isDrawing.current) return;
     const stage = e.target.getStage();
     const point = stage.getPointerPosition();
-    let lastLine = lines[lines.length - 1];
-    lastLine.points = lastLine.points.concat([point.x, point.y]);
-    lines.splice(lines.length - 1, 1, lastLine);
-    setLines(lines.concat());
-    
-    // Sync whiteboard
-    if (socketRef.current) {
-      socketRef.current.emit('whiteboard-draw', { roomId, lines });
-    }
+    if (!point) return;
+
+    setLines((prev) => {
+      const lastLine = prev[prev.length - 1];
+      if (!lastLine) {
+        return prev;
+      }
+
+      const nextLines = [
+        ...prev.slice(0, -1),
+        {
+          ...lastLine,
+          points: [...lastLine.points, point.x, point.y],
+        },
+      ];
+
+      if (socketRef.current) {
+        socketRef.current.emit('whiteboard-draw', { roomId, lines: nextLines });
+      }
+
+      return nextLines;
+    });
   };
 
   const handleMouseUp = () => {
+    if (!isDrawing.current) {
+      return;
+    }
+
     isDrawing.current = false;
   };
 
@@ -214,6 +414,10 @@ export default function RoomDetail() {
       socketRef.current.emit('whiteboard-draw', { roomId, lines: [] });
     }
   };
+
+  const uniqueUsers = users.filter(
+    (roomUser, index, self) => index === self.findIndex((candidate) => candidate.id === roomUser.id),
+  );
 
   return (
     <div className="h-[calc(100vh-120px)] flex flex-col gap-6">
@@ -274,13 +478,56 @@ export default function RoomDetail() {
                         ? 'bg-indigo-600 text-white rounded-tr-none' 
                         : 'bg-slate-900 text-slate-300 border border-slate-800 rounded-tl-none'
                     }`}>
-                      {msg.text}
+                      {isFlashcardMessage(msg.text) ? (
+                        <div className="space-y-2">
+                          <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-wide text-emerald-200">
+                            <Layers className="w-3.5 h-3.5" />
+                            Shared Flashcard
+                          </div>
+                          <div>
+                            <p className="text-[10px] font-bold uppercase opacity-70">Question</p>
+                            <p className="mt-1 whitespace-pre-wrap break-words">{msg.text.question}</p>
+                          </div>
+                          <div className="border-t border-white/10 pt-2">
+                            <p className="text-[10px] font-bold uppercase opacity-70">Answer</p>
+                            <p className="mt-1 whitespace-pre-wrap break-words">{msg.text.answer}</p>
+                          </div>
+                        </div>
+                      ) : isFlashcardsMessage(msg.text) ? (
+                        <div className="space-y-3">
+                          <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-wide text-emerald-200">
+                            <Layers className="w-3.5 h-3.5" />
+                            Shared Flashcards
+                          </div>
+                          {msg.text.cards.map((card, index) => (
+                            <div key={`${card.question}-${index}`} className="rounded-xl border border-white/10 bg-white/5 p-3">
+                              <p className="text-[10px] font-bold uppercase opacity-70">Question</p>
+                              <p className="mt-1 whitespace-pre-wrap break-words">{card.question}</p>
+                              <p className="mt-3 text-[10px] font-bold uppercase opacity-70">Answer</p>
+                              <p className="mt-1 whitespace-pre-wrap break-words">{card.answer}</p>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="whitespace-pre-wrap break-words">{formatMessage(String(msg.text || ''))}</div>
+                      )}
                     </div>
                   </div>
                 ))}
                 <div ref={bottomRef} />
               </div>
               <form onSubmit={handleSendMessage} className="p-4 bg-slate-900/50 border-t border-slate-800 flex gap-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedFlashcardIds([]);
+                    setShowFlashcardPicker(true);
+                  }}
+                  className="bg-slate-800 hover:bg-slate-700 text-white px-3 rounded-xl transition-all flex items-center gap-2"
+                >
+                  <Layers className="w-4 h-4" />
+                  Share Flashcard
+                </button>
                 <input 
                   type="text" 
                   value={newMessage}
@@ -331,8 +578,8 @@ export default function RoomDetail() {
                 width={window.innerWidth - 400}
                 height={window.innerHeight - 250}
                 onMouseDown={handleMouseDown}
-                onMousemove={handleMouseMove}
-                onMouseup={handleMouseUp}
+                onMouseMove={handleMouseMove}
+                onMouseUp={handleMouseUp}
               >
                 <Layer>
                   {lines.map((line, i) => (
@@ -363,7 +610,7 @@ export default function RoomDetail() {
               Active Members
             </h3>
             <div className="space-y-3">
-              {users.length > 0 ? users.map((roomUser) => (
+              {uniqueUsers.length > 0 ? uniqueUsers.map((roomUser) => (
                 <div key={roomUser.id} className="flex items-center gap-3 p-2 bg-slate-900/50 rounded-xl border border-slate-800">
                   <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center text-xs font-bold text-white">
                     {roomUser.name?.[0] || 'U'}
@@ -394,15 +641,143 @@ export default function RoomDetail() {
               <Share2 className="w-5 h-5 text-emerald-500" />
               Shared Resources
             </h3>
-            <div className="space-y-3">
-              <div className="p-4 bg-slate-900/50 border border-slate-800 border-dashed rounded-2xl text-center">
-                <FileText className="w-8 h-8 text-slate-700 mx-auto mb-2" />
-                <p className="text-xs text-slate-500">No files shared yet. Drag and drop to share with the group.</p>
+            <div className="space-y-4">
+              <div className="flex gap-2">
+                {(['link', 'image', 'pdf'] as const).map((type) => (
+                  <button
+                    key={type}
+                    type="button"
+                    onClick={() => setResourceType(type)}
+                    className={`rounded-xl px-3 py-2 text-xs font-bold uppercase transition-all ${
+                      resourceType === type ? 'bg-emerald-600 text-white' : 'bg-slate-900 text-slate-400 hover:bg-slate-800'
+                    }`}
+                  >
+                    {type}
+                  </button>
+                ))}
+              </div>
+
+              <form onSubmit={handleSendResource} className="space-y-3">
+                <input
+                  type="url"
+                  value={resourceUrl}
+                  onChange={(e) => setResourceUrl(e.target.value)}
+                  placeholder={resourceType === 'image' ? 'Image URL' : resourceType === 'pdf' ? 'PDF URL' : 'Link URL'}
+                  className="w-full rounded-xl border border-slate-800 bg-slate-900 px-4 py-2.5 text-sm text-white focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
+                />
+                <input
+                  type="text"
+                  value={resourceName}
+                  onChange={(e) => setResourceName(e.target.value)}
+                  placeholder="Optional display name"
+                  className="w-full rounded-xl border border-slate-800 bg-slate-900 px-4 py-2.5 text-sm text-white focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
+                />
+                <button
+                  type="submit"
+                  disabled={!resourceUrl.trim()}
+                  className="w-full rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-bold text-white transition-all hover:bg-emerald-500 disabled:opacity-50"
+                >
+                  Share Resource
+                </button>
+              </form>
+
+              <div className="space-y-3">
+                {resources.length > 0 ? resources.map((resource, index) => (
+                  <div key={`${resource.url}-${index}`} className="rounded-2xl border border-slate-800 bg-slate-900/50 p-3">
+                    <div className="mb-2 flex items-center gap-2 text-[10px] font-bold uppercase tracking-wide text-slate-500">
+                      {resource.type === 'image' ? <ImageIcon className="w-3.5 h-3.5" /> : resource.type === 'pdf' ? <FileText className="w-3.5 h-3.5" /> : <LinkIcon className="w-3.5 h-3.5" />}
+                      {resource.type}
+                      <span className="text-slate-600">•</span>
+                      <span>{resource.user?.name || 'Shared in room'}</span>
+                    </div>
+
+                    {resource.type === 'image' ? (
+                      <a href={resource.url} target="_blank" rel="noopener noreferrer" className="block">
+                        <img src={resource.url} alt={resource.name || 'Shared image'} className="max-h-44 w-full rounded-xl object-cover" />
+                      </a>
+                    ) : resource.type === 'pdf' ? (
+                      <a href={resource.url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 text-sm text-sky-300 underline underline-offset-2 break-all">
+                        <FileText className="w-4 h-4" />
+                        {resource.name || resource.url}
+                      </a>
+                    ) : (
+                      <a href={resource.url} target="_blank" rel="noopener noreferrer" className="text-sm text-sky-300 underline underline-offset-2 break-all">
+                        {resource.name || resource.url}
+                      </a>
+                    )}
+                  </div>
+                )) : (
+                  <div className="p-4 bg-slate-900/50 border border-slate-800 border-dashed rounded-2xl text-center">
+                    <FileText className="w-8 h-8 text-slate-700 mx-auto mb-2" />
+                    <p className="text-xs text-slate-500">No shared resources yet. Add a link, image URL, or PDF URL to share it with the room.</p>
+                  </div>
+                )}
               </div>
             </div>
           </div>
         </div>
       </div>
+
+      {showFlashcardPicker && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-2xl rounded-3xl border border-slate-800 bg-[#0d1425] p-6 shadow-2xl">
+            <div className="mb-4 flex items-center justify-between">
+              <div>
+                <h2 className="text-xl font-bold text-white">Share Flashcard</h2>
+                <p className="text-sm text-slate-400">Pick one of your saved flashcards to send into the room.</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedFlashcardIds([]);
+                  setShowFlashcardPicker(false);
+                }}
+                className="rounded-xl p-2 text-slate-400 transition-colors hover:bg-slate-800 hover:text-white"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="max-h-[60vh] space-y-3 overflow-y-auto pr-1">
+              {savedFlashcards.length > 0 ? savedFlashcards.map((flashcard) => (
+                <button
+                  key={flashcard.id}
+                  type="button"
+                  onClick={() => toggleFlashcardSelection(flashcard.id)}
+                  className={`w-full rounded-2xl border p-4 text-left transition-all ${
+                    selectedFlashcardIds.includes(flashcard.id)
+                      ? 'border-indigo-500 bg-indigo-500/10'
+                      : 'border-slate-800 bg-slate-900/60 hover:border-indigo-500/50 hover:bg-slate-900'
+                  }`}
+                >
+                  <p className="text-[10px] font-bold uppercase tracking-wide text-indigo-400">Question</p>
+                  <p className="mt-1 line-clamp-2 text-sm font-medium text-white">{flashcard.question}</p>
+                  <p className="mt-3 text-[10px] font-bold uppercase tracking-wide text-emerald-400">Answer</p>
+                  <p className="mt-1 line-clamp-3 text-sm text-slate-300">{flashcard.answer}</p>
+                </button>
+              )) : (
+                <div className="rounded-2xl border border-dashed border-slate-700 bg-slate-900/40 p-8 text-center">
+                  <p className="text-sm text-slate-400">No saved flashcards found yet. Create some in the Flashcards page first.</p>
+                </div>
+              )}
+            </div>
+
+            {savedFlashcards.length > 0 && (
+              <div className="mt-4 flex items-center justify-between gap-3 border-t border-slate-800 pt-4">
+                <p className="text-sm text-slate-400">{selectedFlashcardIds.length} selected</p>
+                <button
+                  type="button"
+                  onClick={handleShareFlashcards}
+                  disabled={selectedFlashcardIds.length === 0}
+                  className="rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-bold text-white transition-all hover:bg-indigo-500 disabled:opacity-50"
+                >
+                  Share Selected
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

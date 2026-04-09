@@ -148,10 +148,20 @@ export interface RoomMessage {
   roomId: string;
   userId: string;
   userName: string;
-  text: string;
-  type: 'text' | 'file' | 'note';
+  text: string | {
+    type: 'flashcard';
+    question: string;
+    answer: string;
+  } | {
+    type: 'flashcards';
+    cards: Array<{
+      question: string;
+      answer: string;
+    }>;
+  };
+  type: 'text' | 'file' | 'note' | 'flashcard' | 'flashcards';
   fileUrl?: string;
-  createdAt: Timestamp;
+  createdAt?: Timestamp | Date | null;
 }
 
 export interface Bookmark {
@@ -199,7 +209,10 @@ export const getRecentNotes = async (userId: string, count = 3) => {
   );
 
   const notes = docs
-    .map((doc) => ({ id: doc.id, ...doc.data() } as Note))
+    .map((doc) => {
+      const data = doc.data() as Record<string, unknown>;
+      return { id: doc.id, ...data } as Note;
+    })
     .sort((a, b) => getMillis(b.updatedAt) - getMillis(a.updatedAt))
     .slice(0, count);
 
@@ -227,7 +240,10 @@ export const getRecentSummaries = async (userId: string, count = 3) => {
   );
 
   const summaries = docs
-    .map((doc) => ({ id: doc.id, ...doc.data() } as Note))
+    .map((doc) => {
+      const data = doc.data() as Record<string, unknown>;
+      return { id: doc.id, ...data } as Note;
+    })
     .sort((a, b) => getMillis(b.updatedAt ?? b.createdAt) - getMillis(a.updatedAt ?? a.createdAt))
     .slice(0, count);
 
@@ -431,6 +447,38 @@ export const saveRoomMessage = async (message: Omit<RoomMessage, 'id' | 'created
     createdAt: Timestamp.now(),
   });
   return docRef.id;
+};
+
+export const getUserFlashcards = async (userId: string) => {
+  const primarySnapshot = await getDocs(query(
+    collection(db, COLLECTIONS.FLASHCARDS),
+    where('userId', '==', userId),
+  ));
+
+  let legacySnapshot = { docs: [] as typeof primarySnapshot.docs };
+  if (LEGACY_COLLECTIONS.FLASHCARDS !== COLLECTIONS.FLASHCARDS) {
+    legacySnapshot = await getDocs(query(
+      collection(db, LEGACY_COLLECTIONS.FLASHCARDS),
+      where('userId', '==', userId),
+    ));
+  }
+
+  return [...primarySnapshot.docs, ...legacySnapshot.docs].map((docSnapshot) => {
+    const data = docSnapshot.data() as {
+      question?: string;
+      answer?: string;
+      front?: string;
+      back?: string;
+      createdAt?: Timestamp | Date | null;
+    };
+
+    return {
+      id: docSnapshot.id,
+      question: data.question ?? data.front ?? '',
+      answer: data.answer ?? data.back ?? '',
+      createdAt: data.createdAt ?? null,
+    };
+  }).sort((a, b) => getMillis(b.createdAt) - getMillis(a.createdAt));
 };
 
 // Bookmark Functions

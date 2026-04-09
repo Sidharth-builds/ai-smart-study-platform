@@ -19,7 +19,79 @@ interface MulterRequest extends Request {
 type RoomUser = {
   id: string;
   name: string;
+  socketId: string;
+  socketIds: string[];
+  roomId: string;
 };
+
+type ChatUser = {
+  id: string;
+  name: string;
+};
+
+type ChatMessage =
+  | string
+  | {
+      type: "flashcard";
+      question: string;
+      answer: string;
+    }
+  | {
+      type: "flashcards";
+      cards: Array<{
+        question: string;
+        answer: string;
+      }>;
+    };
+
+type SharedResource = {
+  type: "image" | "pdf" | "link";
+  url: string;
+  name?: string;
+  user?: ChatUser;
+  timestamp?: Date;
+};
+
+const users: RoomUser[] = [];
+
+function addUser(socketId: string, user: ChatUser, roomId: string) {
+  const existing = users.find((roomUser) => roomUser.id === user.id && roomUser.roomId === roomId);
+  if (existing) {
+    if (!existing.socketIds.includes(socketId)) {
+      existing.socketIds.push(socketId);
+    }
+    existing.socketId = existing.socketIds[0];
+    existing.name = user.name;
+    return existing;
+  }
+
+  const newUser = { socketId, socketIds: [socketId], ...user, roomId };
+  users.push(newUser);
+  return newUser;
+}
+
+function removeUser(socketId: string) {
+  const roomUser = users.find((candidate) => candidate.socketIds.includes(socketId));
+  if (!roomUser) {
+    return undefined;
+  }
+
+  roomUser.socketIds = roomUser.socketIds.filter((candidateSocketId) => candidateSocketId !== socketId);
+  roomUser.socketId = roomUser.socketIds[0] || roomUser.socketId;
+
+  if (roomUser.socketIds.length === 0) {
+    const index = users.findIndex((candidate) => candidate.id === roomUser.id && candidate.roomId === roomUser.roomId);
+    if (index !== -1) {
+      return users.splice(index, 1)[0];
+    }
+  }
+
+  return roomUser;
+}
+
+function getUsersInRoom(roomId: string) {
+  return users.filter((roomUser) => roomUser.roomId === roomId);
+}
 
 async function startServer() {
   const app = express();
@@ -30,69 +102,84 @@ async function startServer() {
       methods: ["GET", "POST"],
     },
   });
-  const roomUsers = new Map<string, RoomUser[]>();
-
   const PORT = 3000;
 
   // Socket.IO Logic
   io.on("connection", (socket) => {
     console.log("A user connected:", socket.id);
 
-    socket.on("joinRoom", ({ roomId, user }) => {
+    socket.on("joinRoom", ({ roomId, user }: { roomId?: string; user?: ChatUser }) => {
       if (!roomId || !user?.id) {
         return;
       }
 
       socket.join(roomId);
       socket.data.roomId = roomId;
-      socket.data.user = user;
+      socket.data.user = addUser(socket.id, user, roomId);
 
-      const users = roomUsers.get(roomId) || [];
-      const nextUsers = users.some((existingUser) => existingUser.id === user.id)
-        ? users.map((existingUser) => (existingUser.id === user.id ? user : existingUser))
-        : [...users, user];
-
-      roomUsers.set(roomId, nextUsers);
-      io.to(roomId).emit("roomUsers", nextUsers);
+      io.to(roomId).emit("roomUsers", getUsersInRoom(roomId));
 
       console.log(`User ${socket.id} joined room ${roomId}`);
     });
 
-    socket.on("sendMessage", ({ roomId, message, user }) => {
+    socket.on("sendMessage", ({ roomId, message, user }: { roomId?: string; message?: ChatMessage; user?: ChatUser }) => {
       if (!roomId || !message || !user?.id) {
         return;
       }
 
-      io.to(roomId).emit("message", {
+      const msg = {
         roomId,
         text: message,
         userId: user.id,
         userName: user.name,
+        type:
+          typeof message === "object" && message.type === "flashcards"
+            ? "flashcards"
+            : typeof message === "object" && message.type === "flashcard"
+              ? "flashcard"
+              : "text",
+        timestamp: new Date(),
+      };
+
+      io.to(roomId).emit("message", msg);
+    });
+
+    socket.on("sendResource", ({ roomId, resource }: { roomId?: string; resource?: SharedResource }) => {
+      if (!roomId || !resource?.type || !resource?.url) {
+        return;
+      }
+
+      io.to(roomId).emit("newResource", {
+        ...resource,
+        timestamp: new Date(),
       });
+    });
+
+    socket.on("leaveRoom", ({ roomId }: { roomId?: string } = {}) => {
+      const targetRoomId = roomId || (socket.data.roomId as string | undefined);
+      const removedUser = removeUser(socket.id);
+
+      if (removedUser) {
+        socket.leave(removedUser.roomId);
+      }
+
+      if (targetRoomId) {
+        io.to(targetRoomId).emit("roomUsers", getUsersInRoom(targetRoomId));
+      }
+    });
+
+    socket.on("disconnect", () => {
+      const disconnectedUser = removeUser(socket.id);
+
+      if (disconnectedUser) {
+        io.to(disconnectedUser.roomId).emit("roomUsers", getUsersInRoom(disconnectedUser.roomId));
+      }
+
+      console.log("User disconnected:", socket.id);
     });
 
     socket.on("whiteboard-draw", (data) => {
       socket.to(data.roomId).emit("whiteboard-update", data.lines);
-    });
-
-    socket.on("disconnect", () => {
-      const disconnectedRoomId = socket.data.roomId as string | undefined;
-      const disconnectedUser = socket.data.user as RoomUser | undefined;
-
-      if (disconnectedRoomId && disconnectedUser) {
-        const users = roomUsers.get(disconnectedRoomId) || [];
-        const nextUsers = users.filter((user) => user.id !== disconnectedUser.id);
-
-        if (nextUsers.length > 0) {
-          roomUsers.set(disconnectedRoomId, nextUsers);
-        } else {
-          roomUsers.delete(disconnectedRoomId);
-        }
-
-        io.to(disconnectedRoomId).emit("roomUsers", nextUsers);
-      }
-
-      console.log("User disconnected:", socket.id);
     });
   });
 
