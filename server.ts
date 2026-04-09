@@ -29,7 +29,11 @@ type ChatUser = {
 };
 
 type ChatMessage =
-  | string
+  | {
+      type: "text" | "image" | "pdf" | "link";
+      content: string;
+      name?: string;
+    }
   | {
       type: "flashcard";
       question: string;
@@ -152,31 +156,10 @@ async function startServer() {
         return;
       }
 
-      const msg = {
-        roomId,
-        text: message,
-        userId: user.id,
-        userName: user.name,
-        type:
-          typeof message === "object" && message.type === "flashcards"
-            ? "flashcards"
-            : typeof message === "object" && message.type === "flashcard"
-              ? "flashcard"
-              : "text",
-        timestamp: new Date(),
-      };
-
-      io.to(roomId).emit("receive-message", msg);
-    });
-
-    socket.on("send-resource", ({ roomId, resource }: { roomId?: string; resource?: SharedResource }) => {
-      if (!roomId || !resource?.type || (!resource.url && !resource.file)) {
-        return;
-      }
-
-      io.to(roomId).emit("newResource", {
-        ...resource,
-        timestamp: new Date(),
+      io.to(roomId).emit("receive-message", {
+        message,
+        user,
+        time: new Date(),
       });
     });
 

@@ -146,22 +146,29 @@ export interface StudyTask {
 export interface RoomMessage {
   id?: string;
   roomId: string;
-  userId: string;
-  userName: string;
-  text: string | {
-    type: 'flashcard';
-    question: string;
-    answer: string;
-  } | {
-    type: 'flashcards';
-    cards: Array<{
-      question: string;
-      answer: string;
-    }>;
+  message:
+    | {
+        type: 'text' | 'image' | 'pdf' | 'link';
+        content: string;
+        name?: string;
+      }
+    | {
+        type: 'flashcard';
+        question: string;
+        answer: string;
+      }
+    | {
+        type: 'flashcards';
+        cards: Array<{
+          question: string;
+          answer: string;
+        }>;
+      };
+  user: {
+    id: string;
+    name: string;
   };
-  type: 'text' | 'file' | 'note' | 'flashcard' | 'flashcards';
-  fileUrl?: string;
-  createdAt?: Timestamp | Date | null;
+  time?: Timestamp | Date | string | null;
 }
 
 export interface Bookmark {
@@ -435,16 +442,76 @@ export const getRoomMessages = async (roomId: string) => {
     where('roomId', '==', roomId)
   );
   const querySnapshot = await getDocs(q);
-  const messages = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as RoomMessage));
+  const messages = querySnapshot.docs.map((doc) => {
+    const data = doc.data() as {
+      roomId?: string;
+      message?: RoomMessage['message'];
+      user?: RoomMessage['user'];
+      time?: Timestamp | Date | string | null;
+      text?: string | {
+        type?: string;
+        question?: string;
+        answer?: string;
+        cards?: Array<{ question?: string; answer?: string }>;
+      };
+      type?: string;
+      userId?: string;
+      userName?: string;
+      createdAt?: Timestamp | Date | string | null;
+    };
+
+    const normalizedMessage = data.message ?? (() => {
+      if (typeof data.text === 'string') {
+        return {
+          type: data.type === 'link' ? 'link' : 'text',
+          content: data.text,
+        } as RoomMessage['message'];
+      }
+
+      if (data.text?.type === 'flashcard' && data.text.question && data.text.answer) {
+        return {
+          type: 'flashcard',
+          question: data.text.question,
+          answer: data.text.answer,
+        } as RoomMessage['message'];
+      }
+
+      if (data.text?.type === 'flashcards' && Array.isArray(data.text.cards)) {
+        return {
+          type: 'flashcards',
+          cards: data.text.cards.map((card) => ({
+            question: card.question ?? '',
+            answer: card.answer ?? '',
+          })),
+        } as RoomMessage['message'];
+      }
+
+      return {
+        type: 'text',
+        content: '',
+      } as RoomMessage['message'];
+    })();
+
+    return {
+      id: doc.id,
+      roomId: data.roomId ?? roomId,
+      message: normalizedMessage,
+      user: data.user ?? {
+        id: data.userId ?? 'unknown',
+        name: data.userName ?? 'Anonymous',
+      },
+      time: data.time ?? data.createdAt ?? null,
+    } as RoomMessage;
+  });
   const getMillis = (value: any) =>
     value?.toMillis ? value.toMillis() : value instanceof Date ? value.getTime() : new Date(value || 0).getTime();
-  return messages.sort((a, b) => getMillis(a.createdAt) - getMillis(b.createdAt));
+  return messages.sort((a, b) => getMillis(a.time) - getMillis(b.time));
 };
 
-export const saveRoomMessage = async (message: Omit<RoomMessage, 'id' | 'createdAt'>) => {
+export const saveRoomMessage = async (message: Omit<RoomMessage, 'id' | 'time'>) => {
   const docRef = await addDoc(collection(db, COLLECTIONS.MESSAGES), {
     ...message,
-    createdAt: Timestamp.now(),
+    time: Timestamp.now(),
   });
   return docRef.id;
 };
