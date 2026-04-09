@@ -52,6 +52,16 @@ type SharedResource = {
   timestamp?: Date;
 };
 
+const DEFAULT_ALLOWED_ORIGINS = [
+  "http://localhost:5173",
+];
+
+const allowedOrigins = [
+  ...DEFAULT_ALLOWED_ORIGINS,
+  process.env.FRONTEND_URL,
+  process.env.VERCEL_FRONTEND_URL,
+].filter((origin): origin is string => Boolean(origin));
+
 const users: RoomUser[] = [];
 
 function addUser(socketId: string, user: ChatUser, roomId: string) {
@@ -88,17 +98,34 @@ async function startServer() {
   const httpServer = createServer(app);
   const io = new Server(httpServer, {
     cors: {
-      origin: "*",
+      origin: (origin, callback) => {
+        if (!origin) {
+          callback(null, true);
+          return;
+        }
+
+        const isAllowedOrigin =
+          allowedOrigins.includes(origin) ||
+          /^https:\/\/.*\.vercel\.app$/.test(origin);
+
+        if (isAllowedOrigin) {
+          callback(null, true);
+          return;
+        }
+
+        callback(new Error(`Socket.IO CORS blocked origin: ${origin}`));
+      },
       methods: ["GET", "POST"],
+      credentials: true,
     },
   });
   const PORT = process.env.PORT || 3000;
 
   // Socket.IO Logic
   io.on("connection", (socket) => {
-    console.log("A user connected:", socket.id);
+    console.log("User connected:", socket.id);
 
-    socket.on("joinRoom", ({ roomId, user }: { roomId?: string; user?: ChatUser }) => {
+    socket.on("join-room", ({ roomId, user }: { roomId?: string; user?: ChatUser }) => {
       if (!roomId || !user?.id) {
         return;
       }
@@ -107,12 +134,20 @@ async function startServer() {
       socket.data.roomId = roomId;
       socket.data.user = addUser(socket.id, user, roomId);
 
-      io.to(roomId).emit("roomUsers", getUsersInRoom(roomId));
+      console.log("Joining room:", roomId, user);
+      console.log("Users in room:", getUsersInRoom(roomId));
+
+      io.to(roomId).emit("user-joined", {
+        socketId: socket.id,
+        roomId,
+        user,
+      });
+      io.to(roomId).emit("room-users", getUsersInRoom(roomId));
 
       console.log(`User ${socket.id} joined room ${roomId}`);
     });
 
-    socket.on("sendMessage", ({ roomId, message, user }: { roomId?: string; message?: ChatMessage; user?: ChatUser }) => {
+    socket.on("send-message", ({ roomId, message, user }: { roomId?: string; message?: ChatMessage; user?: ChatUser }) => {
       if (!roomId || !message || !user?.id) {
         return;
       }
@@ -134,7 +169,7 @@ async function startServer() {
       io.to(roomId).emit("receiveMessage", msg);
     });
 
-    socket.on("sendResource", ({ roomId, resource }: { roomId?: string; resource?: SharedResource }) => {
+    socket.on("send-resource", ({ roomId, resource }: { roomId?: string; resource?: SharedResource }) => {
       if (!roomId || !resource?.type || (!resource.url && !resource.file)) {
         return;
       }
@@ -145,7 +180,7 @@ async function startServer() {
       });
     });
 
-    socket.on("leaveRoom", ({ roomId }: { roomId?: string } = {}) => {
+    socket.on("leave-room", ({ roomId }: { roomId?: string } = {}) => {
       const targetRoomId = roomId || (socket.data.roomId as string | undefined);
       const removedUser = removeUser(socket.id);
 
@@ -154,7 +189,7 @@ async function startServer() {
       }
 
       if (targetRoomId) {
-        io.to(targetRoomId).emit("roomUsers", getUsersInRoom(targetRoomId));
+        io.to(targetRoomId).emit("room-users", getUsersInRoom(targetRoomId));
       }
     });
 
@@ -162,7 +197,7 @@ async function startServer() {
       const disconnectedUser = removeUser(socket.id);
 
       if (disconnectedUser) {
-        io.to(disconnectedUser.roomId).emit("roomUsers", getUsersInRoom(disconnectedUser.roomId));
+        io.to(disconnectedUser.roomId).emit("room-users", getUsersInRoom(disconnectedUser.roomId));
       }
 
       console.log("User disconnected:", socket.id);

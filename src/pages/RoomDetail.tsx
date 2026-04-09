@@ -75,7 +75,7 @@ const normalizeRoomUsers = (payload: unknown): RoomUser[] => {
     .filter((roomUser): roomUser is RoomUser => roomUser !== null);
 };
 
-const socketServerUrl = import.meta.env.VITE_SOCKET_SERVER_URL || window.location.origin;
+const socketServerUrl = import.meta.env.VITE_SOCKET_SERVER_URL;
 
 const isFlashcardMessage = (value: RoomMessage['text']): value is FlashcardMessage =>
   Boolean(
@@ -190,21 +190,35 @@ export default function RoomDetail() {
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    if (!socketServerUrl) {
+      console.error('Missing VITE_SOCKET_SERVER_URL');
+      return;
+    }
+
+    console.log('Socket URL:', socketServerUrl);
+
     const socket = io(socketServerUrl, {
-      transports: ['websocket', 'polling'],
+      transports: ['websocket'],
+      withCredentials: true,
     });
     socketRef.current = socket;
+
+    console.log('Connected:', socket.connected);
+
+    socket.on('connect', () => {
+      console.log('Connected:', socket.connected);
+    });
 
     socket.on('receiveMessage', (newMessage: RoomMessage) => {
       setMessages((prev) => [...prev, { ...newMessage, type: newMessage.type || 'text' }]);
     });
 
-    socket.on('message', (msg: RoomMessage) => {
-      setMessages((prev) => [...prev, { ...msg, type: msg.type || 'text' }]);
+    socket.on('room-users', (payload: unknown) => {
+      setUsers(normalizeRoomUsers(payload));
     });
 
-    socket.on('roomUsers', (payload: unknown) => {
-      setUsers(normalizeRoomUsers(payload));
+    socket.on('user-joined', (payload: unknown) => {
+      console.log('User joined room:', payload);
     });
 
     socket.on('newResource', (resource: SharedResource) => {
@@ -216,15 +230,16 @@ export default function RoomDetail() {
     });
 
     return () => {
+      socket.off('connect');
       socket.off('receiveMessage');
-      socket.off('message');
-      socket.off('roomUsers');
+      socket.off('room-users');
+      socket.off('user-joined');
       socket.off('newResource');
       socket.off('whiteboard-update');
       socket.disconnect();
       socketRef.current = null;
     };
-  }, []);
+  }, [socketServerUrl]);
 
   useEffect(() => {
     if (!roomId) return;
@@ -281,13 +296,13 @@ export default function RoomDetail() {
       name: user.displayName || 'Anonymous',
     };
 
-    currentSocket.emit('joinRoom', {
+    currentSocket.emit('join-room', {
       roomId,
       user: currentUser,
     });
 
     return () => {
-      currentSocket.emit('leaveRoom', { roomId });
+      currentSocket.emit('leave-room', { roomId });
     };
   }, [roomId, user?.uid, user?.displayName]);
 
@@ -300,7 +315,7 @@ export default function RoomDetail() {
       return;
     }
 
-    socketRef.current.emit('sendResource', {
+    socketRef.current.emit('send-resource', {
       roomId,
       resource: {
         ...resource,
@@ -340,7 +355,7 @@ export default function RoomDetail() {
     };
 
     try {
-      socketRef.current.emit('sendMessage', {
+      socketRef.current.emit('send-message', {
         roomId,
         message: trimmedMessage,
         user: {
@@ -405,7 +420,7 @@ export default function RoomDetail() {
     };
 
     try {
-      socketRef.current.emit('sendMessage', {
+      socketRef.current.emit('send-message', {
         roomId,
         message: flashcardMessage,
         user: {
