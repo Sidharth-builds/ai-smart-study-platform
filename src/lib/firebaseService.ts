@@ -10,7 +10,8 @@ import {
   limit,
   Timestamp,
   addDoc,
-  deleteDoc
+  deleteDoc,
+  increment
 } from 'firebase/firestore';
 import { db } from './firebase';
 
@@ -598,6 +599,10 @@ export const getStudySessions = async (userId: string) => {
 
 export const addStudySession = async (session: Omit<StudySession, 'id'>) => {
   const docRef = await addDoc(collection(db, COLLECTIONS.STUDY_SESSIONS), session);
+  // Increment user's study time
+  await setDoc(doc(db, "users", session.userId), {
+    studyTime: increment(session.duration)
+  }, { merge: true });
   return docRef.id;
 };
 

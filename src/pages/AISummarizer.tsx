@@ -2,7 +2,7 @@ import React, { useRef, useState } from 'react';
 import { FileText, Sparkles, Upload, Copy, Save, CheckCircle2 } from 'lucide-react';
 import { generateStudyContent, type SummaryMode } from '../lib/gemini';
 import { db } from '../lib/firebase';
-import { collection, addDoc, Timestamp } from 'firebase/firestore';
+import { collection, addDoc, Timestamp, setDoc, increment, doc } from 'firebase/firestore';
 import { useAuth } from '../lib/AuthContext';
 import { COLLECTIONS } from '../lib/firebaseService';
 import * as pdfjsLib from "pdfjs-dist";
@@ -139,6 +139,10 @@ export default function AISummarizer() {
         updatedAt: Timestamp.now(),
         type: 'ai_summary'
       });
+      // Increment user's summaries count
+      await setDoc(doc(db, "users", user.uid), {
+        summaries: increment(1)
+      }, { merge: true });
       setSaved(true);
     } catch (error) {
       console.error("Error saving note:", error);

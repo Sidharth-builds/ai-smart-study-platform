@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Activity, Bell, Clock3, Flame, GraduationCap, Mail, Shield, Trophy, UserCircle } from 'lucide-react';
 import { useAuth } from '../lib/AuthContext';
 import { getTotalStudyHours, getSummariesCreated, getCurrentStreak } from '../services/profileService';
-import { collection, query, where, limit, getDocs, Timestamp, doc, getDoc } from 'firebase/firestore';
+import { collection, query, where, limit, getDocs, Timestamp, doc, getDoc, setDoc, increment } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { COLLECTIONS } from '../lib/firebaseService';
 
@@ -27,10 +27,13 @@ export default function Profile() {
   const [activities, setActivities] = useState<ActivityItem[]>([]);
   const [userProfile, setUserProfile] = useState<UserProfile>({ name: '', studyStream: '' });
   const [loading, setLoading] = useState(true);
+  const [userData, setUserData] = useState<any>({});
+  const [stream, setStream] = useState('');
 
   useEffect(() => {
     if (user) {
       fetchStats();
+      fetchUser().then(() => updateStreak());
     }
   }, [user]);
 
@@ -126,6 +129,45 @@ export default function Profile() {
     }
   };
 
+  const fetchUser = async () => {
+    if (!user) return;
+    const docRef = doc(db, "users", user.uid);
+    const snap = await getDoc(docRef);
+    if (snap.exists()) {
+      const data = snap.data();
+      setUserData(data);
+      setStream(data.stream || '');
+    }
+  };
+
+  const saveStream = async () => {
+    if (!user) return;
+    await setDoc(doc(db, "users", user.uid), {
+      stream: stream
+    }, { merge: true });
+    await fetchUser(); // Refresh data
+  };
+
+  const updateStreak = async () => {
+    if (!user) return;
+    const today = new Date().toDateString();
+    if (userData.lastActiveDate !== today) {
+      let newStreak = userData.streak || 0;
+      const yesterday = new Date();
+      yesterday.setDate(yesterday.getDate() - 1);
+      if (userData.lastActiveDate === yesterday.toDateString()) {
+        newStreak += 1;
+      } else {
+        newStreak = 1;
+      }
+      await setDoc(doc(db, "users", user.uid), {
+        streak: newStreak,
+        lastActiveDate: today
+      }, { merge: true });
+      setUserData({ ...userData, streak: newStreak, lastActiveDate: today });
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex min-h-[60vh] items-center justify-center">
@@ -150,8 +192,20 @@ export default function Profile() {
             </div>
             <h2 className="text-2xl font-bold text-slate-900 dark:text-white">{userProfile.name}</h2>
             <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">🚀 Active Learner</p>
-            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{userProfile.studyStream}</p>
+            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{userData.stream || "Not set yet"}</p>
             <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">{user?.email || 'No email found'}</p>
+            <div className="mt-4">
+              <input
+                type="text"
+                placeholder="Enter your study stream"
+                value={stream}
+                onChange={(e) => setStream(e.target.value)}
+                className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
+              />
+              <button onClick={saveStream} className="mt-2 w-full rounded-lg bg-indigo-600 py-2 font-bold text-white transition-all hover:bg-indigo-500">
+                Save
+              </button>
+            </div>
             <button className="mt-6 w-full rounded-xl bg-indigo-600 py-3 font-bold text-white transition-all hover:bg-indigo-500">
               Manage Account
             </button>
@@ -162,15 +216,15 @@ export default function Profile() {
             <div className="space-y-4">
               <div className="flex items-center justify-between">
                 <span className="text-slate-600 dark:text-slate-400 text-sm">Total Study Time</span>
-                <span className="text-slate-900 dark:text-white font-bold">{totalStudyTime === 0 ? 'No data yet' : totalStudyTime.toFixed(1) + ' Hours'}</span>
+                <span className="text-slate-900 dark:text-white font-bold">{(userData.studyTime || 0) === 0 ? 'No data yet' : (userData.studyTime || 0).toFixed(1) + ' Hours'}</span>
               </div>
               <div className="flex items-center justify-between">
                 <span className="text-slate-600 dark:text-slate-400 text-sm">Summaries Created</span>
-                <span className="text-slate-900 dark:text-white font-bold">{summariesCreated === 0 ? 'No summaries yet' : summariesCreated}</span>
+                <span className="text-slate-900 dark:text-white font-bold">{(userData.summaries || 0) === 0 ? 'No summaries yet' : userData.summaries || 0}</span>
               </div>
               <div className="flex items-center justify-between">
                 <span className="text-slate-600 dark:text-slate-400 text-sm">Current Streak</span>
-                <span className="text-emerald-600 dark:text-emerald-400 font-bold">{currentStreak === 0 ? 'No streak yet' : currentStreak + ' Days'}</span>
+                <span className="text-emerald-600 dark:text-emerald-400 font-bold">{(userData.streak || 0) === 0 ? 'No streak yet' : (userData.streak || 0) + ' Days'}</span>
               </div>
             </div>
           </div>
@@ -233,7 +287,7 @@ export default function Profile() {
 
               {[
                 { icon: UserCircle, label: 'Full Name', value: userProfile.name },
-                { icon: GraduationCap, label: 'Study Stream', value: userProfile.studyStream },
+                { icon: GraduationCap, label: 'Study Stream', value: userData.stream || "Not set yet" },
                 { icon: Shield, label: 'Privacy & Security', value: 'Manage your account access' },
                 { icon: Bell, label: 'Notifications', value: 'Manage study alerts and reminders' },
               ].map((item) => (
@@ -256,7 +310,7 @@ export default function Profile() {
                     <Clock3 className="h-4 w-4 text-indigo-500" />
                     <span className="font-semibold">Study Time</span>
                   </div>
-                  <p className="text-2xl font-bold text-slate-900 dark:text-white">{totalStudyTime === 0 ? 'No data yet' : totalStudyTime.toFixed(1) + ' hrs'}</p>
+                  <p className="text-2xl font-bold text-slate-900 dark:text-white">{(userData.studyTime || 0) === 0 ? 'No data yet' : (userData.studyTime || 0).toFixed(1) + ' hrs'}</p>
                   <p className="text-sm text-slate-500 dark:text-slate-400">Total tracked learning time</p>
                 </div>
 
@@ -265,7 +319,7 @@ export default function Profile() {
                     <Flame className="h-4 w-4 text-emerald-500" />
                     <span className="font-semibold">Current Streak</span>
                   </div>
-                  <p className="text-2xl font-bold text-slate-900 dark:text-white">{currentStreak === 0 ? 'No streak yet' : currentStreak + ' days'}</p>
+                  <p className="text-2xl font-bold text-slate-900 dark:text-white">{(userData.streak || 0) === 0 ? 'No streak yet' : (userData.streak || 0) + ' days'}</p>
                   <p className="text-sm text-slate-500 dark:text-slate-400">Keep the momentum going</p>
                 </div>
 
@@ -283,7 +337,7 @@ export default function Profile() {
                     <Trophy className="h-4 w-4 text-violet-500" />
                     <span className="font-semibold">Summaries Created</span>
                   </div>
-                  <p className="text-2xl font-bold text-slate-900 dark:text-white">{summariesCreated === 0 ? 'No summaries yet' : summariesCreated}</p>
+                  <p className="text-2xl font-bold text-slate-900 dark:text-white">{(userData.summaries || 0) === 0 ? 'No summaries yet' : userData.summaries || 0}</p>
                   <p className="text-sm text-slate-500 dark:text-slate-400">AI notes generated so far</p>
                 </div>
               </div>
