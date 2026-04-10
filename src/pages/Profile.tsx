@@ -100,7 +100,7 @@ export default function Profile() {
 
   const getUserProfile = async (userId: string): Promise<UserProfile> => {
     const fallbackName = user?.displayName || user?.email?.split('@')[0] || 'User';
-    const fallbackStream = 'Not specified';
+    const fallbackStream = 'Not set yet';
 
     try {
       const userDoc = await getDoc(doc(db, 'users', userId));
@@ -149,6 +149,7 @@ export default function Profile() {
               <UserCircle className="h-20 w-20 text-indigo-500" />
             </div>
             <h2 className="text-2xl font-bold text-slate-900 dark:text-white">{userProfile.name}</h2>
+            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">🚀 Active Learner</p>
             <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{userProfile.studyStream}</p>
             <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">{user?.email || 'No email found'}</p>
             <button className="mt-6 w-full rounded-xl bg-indigo-600 py-3 font-bold text-white transition-all hover:bg-indigo-500">
@@ -161,15 +162,15 @@ export default function Profile() {
             <div className="space-y-4">
               <div className="flex items-center justify-between">
                 <span className="text-slate-600 dark:text-slate-400 text-sm">Total Study Time</span>
-                <span className="text-slate-900 dark:text-white font-bold">{totalStudyTime.toFixed(1)} Hours</span>
+                <span className="text-slate-900 dark:text-white font-bold">{totalStudyTime === 0 ? 'No data yet' : totalStudyTime.toFixed(1) + ' Hours'}</span>
               </div>
               <div className="flex items-center justify-between">
                 <span className="text-slate-600 dark:text-slate-400 text-sm">Summaries Created</span>
-                <span className="text-slate-900 dark:text-white font-bold">{summariesCreated}</span>
+                <span className="text-slate-900 dark:text-white font-bold">{summariesCreated === 0 ? 'No summaries yet' : summariesCreated}</span>
               </div>
               <div className="flex items-center justify-between">
                 <span className="text-slate-600 dark:text-slate-400 text-sm">Current Streak</span>
-                <span className="text-emerald-600 dark:text-emerald-400 font-bold">{currentStreak} Days</span>
+                <span className="text-emerald-600 dark:text-emerald-400 font-bold">{currentStreak === 0 ? 'No streak yet' : currentStreak + ' Days'}</span>
               </div>
             </div>
           </div>
@@ -206,7 +207,7 @@ export default function Profile() {
                   </div>
                 ))
               ) : (
-                <p className="text-slate-500 dark:text-slate-400 text-sm text-center py-4">No recent activity</p>
+                <p className="text-slate-500 dark:text-slate-400 text-sm text-center py-4">Start studying to see your activity here</p>
               )}
             </div>
           </div>
@@ -255,7 +256,7 @@ export default function Profile() {
                     <Clock3 className="h-4 w-4 text-indigo-500" />
                     <span className="font-semibold">Study Time</span>
                   </div>
-                  <p className="text-2xl font-bold text-slate-900 dark:text-white">{totalStudyTime.toFixed(1)} hrs</p>
+                  <p className="text-2xl font-bold text-slate-900 dark:text-white">{totalStudyTime === 0 ? 'No data yet' : totalStudyTime.toFixed(1) + ' hrs'}</p>
                   <p className="text-sm text-slate-500 dark:text-slate-400">Total tracked learning time</p>
                 </div>
 
@@ -264,7 +265,7 @@ export default function Profile() {
                     <Flame className="h-4 w-4 text-emerald-500" />
                     <span className="font-semibold">Current Streak</span>
                   </div>
-                  <p className="text-2xl font-bold text-slate-900 dark:text-white">{currentStreak} days</p>
+                  <p className="text-2xl font-bold text-slate-900 dark:text-white">{currentStreak === 0 ? 'No streak yet' : currentStreak + ' days'}</p>
                   <p className="text-sm text-slate-500 dark:text-slate-400">Keep the momentum going</p>
                 </div>
 
@@ -282,16 +283,12 @@ export default function Profile() {
                     <Trophy className="h-4 w-4 text-violet-500" />
                     <span className="font-semibold">Summaries Created</span>
                   </div>
-                  <p className="text-2xl font-bold text-slate-900 dark:text-white">{summariesCreated}</p>
+                  <p className="text-2xl font-bold text-slate-900 dark:text-white">{summariesCreated === 0 ? 'No summaries yet' : summariesCreated}</p>
                   <p className="text-sm text-slate-500 dark:text-slate-400">AI notes generated so far</p>
                 </div>
               </div>
             </div>
           </div>
-          
-          <button className="w-full bg-red-500/10 hover:bg-red-500/20 text-red-500 font-bold py-4 rounded-2xl border border-red-500/20 transition-all">
-            Deactivate Account
-          </button>
         </div>
       </div>
       </div>
