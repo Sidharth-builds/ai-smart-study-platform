@@ -337,12 +337,23 @@ export default function RoomDetail() {
       } else {
         if (!resourceFile) return;
 
-        const content = await convertFileToDataUrl(resourceFile);
-        await persistAndEmitMessage({
-          type: resourceType,
-          content,
-          name: resourceName.trim() || resourceFile.name,
-        });
+        if (resourceType === 'pdf') {
+          // For PDFs, create a temporary link instead of base64
+          const fileUrl = URL.createObjectURL(resourceFile);
+          await persistAndEmitMessage({
+            type: 'link',
+            content: fileUrl,
+            name: resourceName.trim() || resourceFile.name,
+          });
+        } else {
+          // For images, keep the existing base64 approach
+          const content = await convertFileToDataUrl(resourceFile);
+          await persistAndEmitMessage({
+            type: resourceType,
+            content,
+            name: resourceName.trim() || resourceFile.name,
+          });
+        }
       }
 
       setResourceUrl('');
@@ -513,7 +524,7 @@ export default function RoomDetail() {
                         </a>
                       ) : isStandardMessage(msg.message) && msg.message.type === 'link' ? (
                         <a href={msg.message.content} target="_blank" rel="noopener noreferrer" className="text-blue-400 underline break-all">
-                          Link {msg.message.content}
+                          {msg.message.content.startsWith('blob:') ? `📄 ${msg.message.name || msg.message.content}` : `Link ${msg.message.content}`}
                         </a>
                       ) : (
                         <div className="whitespace-pre-wrap break-words">
@@ -638,9 +649,9 @@ export default function RoomDetail() {
                       <a href={resourceMessage.content} target="_blank" rel="noopener noreferrer" className="block">
                         <img src={resourceMessage.content} alt={resourceMessage.name || 'shared'} className="max-h-44 w-full rounded-xl object-cover" />
                       </a>
-                    ) : resourceMessage.type === 'pdf' ? (
+                    ) : resourceMessage.type === 'link' && resourceMessage.content.startsWith('blob:') ? (
                       <a href={resourceMessage.content} target="_blank" rel="noopener noreferrer" className="text-blue-400 underline break-all">
-                        PDF {resourceMessage.name || 'View PDF'}
+                        📄 {resourceMessage.name || 'PDF'}
                       </a>
                     ) : (
                       <a href={resourceMessage.content} target="_blank" rel="noopener noreferrer" className="text-blue-400 underline break-all">
