@@ -1,5 +1,5 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
-import { cleanAcademicText } from "./documentProcessing";
+import { prepareFlashcardSourceText } from "./documentProcessing";
 
 type StudyContent = {
   summary: string;
@@ -69,8 +69,27 @@ const cleanText = (text: string): string => {
     .trim();
 };
 
-const parseJsonResponse = <T>(text: string): T => {
+const extractJsonPayload = (text: string): string => {
   const cleanedText = cleanJsonText(text);
+  const firstArrayIndex = cleanedText.indexOf("[");
+  const lastArrayIndex = cleanedText.lastIndexOf("]");
+
+  if (firstArrayIndex !== -1 && lastArrayIndex !== -1 && lastArrayIndex > firstArrayIndex) {
+    return cleanedText.slice(firstArrayIndex, lastArrayIndex + 1).trim();
+  }
+
+  const firstObjectIndex = cleanedText.indexOf("{");
+  const lastObjectIndex = cleanedText.lastIndexOf("}");
+
+  if (firstObjectIndex !== -1 && lastObjectIndex !== -1 && lastObjectIndex > firstObjectIndex) {
+    return cleanedText.slice(firstObjectIndex, lastObjectIndex + 1).trim();
+  }
+
+  return cleanedText;
+};
+
+const parseJsonResponse = <T>(text: string): T => {
+  const cleanedText = extractJsonPayload(text);
 
   try {
     return JSON.parse(cleanedText) as T;
@@ -181,73 +200,38 @@ export const generateStudyContent = async (
 
 export const generateFlashcards = async (text: string): Promise<Flashcard[]> => {
   try {
-    const input = cleanAcademicText(cleanText(text), { maxChars: 7000 });
+    const input = prepareFlashcardSourceText(cleanText(text), { maxChars: 5000 });
 
     if (!input) {
-      throw new Error("Unable to extract meaningful content");
+      console.error("Gemini flashcard input was cleaned to empty text", { textLength: text.length });
+      throw new Error("Unable to extract meaningful content from the provided study material.");
     }
 
-    const concepts = await generateJson<string[]>(`
-Generate flashcards ONLY from meaningful academic content.
-Ignore technical, metadata, or irrelevant text.
+    const flashcards = await generateJson<GeneratedFlashcard[]>(`
+You are an expert study assistant.
 
-From the following cleaned study material, extract the most important concepts, definitions, and key topics.
+Extract only meaningful study content and generate flashcards.
 
 Rules:
-- Ignore metadata, file structure content, system-generated text, formatting, and noise
-- Focus only on important academic concepts
-- Return a list of key points
+- Ignore headings, page numbers, unit titles
+- Ignore repeated or useless text
+- Focus only on key concepts, definitions, explanations
+- Skip unclear or noisy content
 
-Return JSON:
+Return ONLY JSON:
 [
-  "concept 1",
-  "concept 2",
-  "concept 3"
+  { "question": "...", "answer": "..." }
 ]
 
 Study material:
 ${input}
 `);
 
-    if (!Array.isArray(concepts)) {
-      throw new Error("Gemini concept extraction response was not an array.");
-    }
-
-    const filteredConcepts = concepts.filter(
-      (concept): concept is string => typeof concept === "string" && concept.trim().length > 0,
-    );
-
-    if (filteredConcepts.length === 0) {
-      throw new Error("Unable to extract meaningful content");
-    }
-
-    const flashcards = await generateJson<GeneratedFlashcard[]>(`
-Generate flashcards ONLY from meaningful academic content.
-Ignore technical, metadata, or irrelevant text.
-
-Generate exam-style flashcards from these concepts.
-
-Rules:
-- Questions must be clear and meaningful
-- Focus on definitions and explanations
-- Avoid trivial or irrelevant questions
-- Only generate flashcards from important academic concepts
-- Ignore metadata, file structure content, system-generated text, and irrelevant technical descriptions
-
-Return JSON:
-[
-  { "question": "...", "answer": "..." }
-]
-
-Concepts:
-${filteredConcepts.map((concept, index) => `${index + 1}. ${concept}`).join("\n")}
-`);
-
     if (!Array.isArray(flashcards)) {
       throw new Error("Gemini flashcard response was not an array.");
     }
 
-    return flashcards
+    const filteredFlashcards = flashcards
       .filter(
         (card): card is GeneratedFlashcard =>
           typeof card?.question === "string" && card.question.trim().length > 0 &&
@@ -257,6 +241,12 @@ ${filteredConcepts.map((concept, index) => `${index + 1}. ${concept}`).join("\n"
         front: card.question.trim(),
         back: card.answer.trim(),
       }));
+
+    if (filteredFlashcards.length === 0) {
+      throw new Error("Gemini returned no usable flashcards.");
+    }
+
+    return filteredFlashcards;
   } catch (error) {
     console.error("Gemini Flashcard Error:", error);
     throw error;

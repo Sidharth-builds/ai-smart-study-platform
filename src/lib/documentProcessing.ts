@@ -1,10 +1,18 @@
 import { pdfjsLib } from "./pdfjs";
 
-const NOISE_PATTERN = /\b(pdf|document|structure|copyright|page)\b/i;
+const NOISE_PATTERN = /\b(pdf|document|structure|copyright|page|page\s*\d+|fig(?:ure)?|table|chapter|section|www\.|https?:\/\/|\[\d+\])\b/i;
 const SYMBOL_HEAVY_PATTERN = /[^a-zA-Z0-9\s,.;:()'"%/\-]/g;
+const PAGE_NUMBER_PATTERN = /^\s*(page\s*)?\d+\s*$/i;
+const HEADER_FOOTER_PATTERN = /^(\s*chapter\s+\d+|\s*section\s+\d+|\s*\d+\.\s+.*|\s*.*\s+\d+\s*)$/i;
 
 type CleanAcademicTextOptions = {
   maxChars?: number;
+};
+
+type PdfTextItem = {
+  str?: string;
+  hasEOL?: boolean;
+  transform?: number[];
 };
 
 const normalizeWhitespace = (text: string): string =>
@@ -26,6 +34,14 @@ const hasEnoughWords = (line: string): boolean => {
   return words.length >= 5;
 };
 
+const looksLikeHeaderFooter = (line: string): boolean => {
+  const trimmed = line.trim();
+  if (!trimmed) return false;
+  if (PAGE_NUMBER_PATTERN.test(trimmed)) return true;
+  if (HEADER_FOOTER_PATTERN.test(trimmed) && trimmed.split(/\s+/).length <= 6) return true;
+  return /^(?:page|chapter|section)\b/i.test(trimmed);
+};
+
 const looksLikeGarbage = (line: string): boolean => {
   const trimmed = line.trim();
 
@@ -44,13 +60,15 @@ const looksLikeGarbage = (line: string): boolean => {
 };
 
 const isMeaningfulLine = (line: string): boolean => {
-  const trimmed = stripProblemCharacters(line).trim();
+  const stripped = stripProblemCharacters(line).trim();
 
-  if (!trimmed) return false;
-  if (NOISE_PATTERN.test(trimmed)) return false;
-  if (isNumbersOnly(trimmed)) return false;
-  if (!hasEnoughWords(trimmed)) return false;
-  if (looksLikeGarbage(trimmed)) return false;
+  if (!stripped) return false;
+  if (NOISE_PATTERN.test(stripped)) return false;
+  if (PAGE_NUMBER_PATTERN.test(stripped)) return false;
+  if (looksLikeHeaderFooter(stripped)) return false;
+  if (isNumbersOnly(stripped)) return false;
+  if (!hasEnoughWords(stripped)) return false;
+  if (looksLikeGarbage(stripped)) return false;
 
   return true;
 };
@@ -131,17 +149,65 @@ export const extractTextFromPdfFile = async (file: File): Promise<string> => {
   }
 
   const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer.slice(0)) }).promise;
-  const pages: string[] = [];
+  const lines: string[] = [];
 
   for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
     const page = await pdf.getPage(pageNumber);
     const content = await page.getTextContent();
-    const pageText = content.items.map((item: any) => item.str).join(" ").trim();
+    let currentLine = "";
+    let lastY: number | null = null;
 
-    if (pageText) {
-      pages.push(pageText);
+    (content.items as PdfTextItem[]).forEach((item) => {
+      const value = typeof item.str === "string" ? item.str.trim() : "";
+      if (!value) {
+        return;
+      }
+
+      const y = Array.isArray(item.transform) ? item.transform[5] : null;
+      const isNewVisualLine = lastY !== null && y !== null && Math.abs(lastY - y) > 4;
+
+      if ((isNewVisualLine || item.hasEOL) && currentLine.trim()) {
+        lines.push(currentLine.replace(/\s{2,}/g, " ").trim());
+        currentLine = "";
+      }
+
+      currentLine = `${currentLine} ${value}`.trim();
+      lastY = y;
+
+      if (item.hasEOL && currentLine.trim()) {
+        lines.push(currentLine.replace(/\s{2,}/g, " ").trim());
+        currentLine = "";
+      }
+    });
+
+    if (currentLine.trim()) {
+      lines.push(currentLine.replace(/\s{2,}/g, " ").trim());
     }
   }
 
-  return pages.join("\n\n");
+  return lines.join("\n").replace(/\n{2,}/g, "\n").trim();
+};
+
+export const prepareFlashcardSourceText = (
+  text: string,
+  { maxChars = 5000 }: CleanAcademicTextOptions = {},
+): string => {
+  const seen = new Set<string>();
+  const cleanedLines = normalizeWhitespace(text)
+    .split("\n")
+    .map((line) => stripProblemCharacters(line).trim())
+    .filter((line) => line.length >= 30)
+    .filter((line) => !PAGE_NUMBER_PATTERN.test(line))
+    .filter((line) => !looksLikeHeaderFooter(line))
+    .filter((line) => !isNumbersOnly(line))
+    .filter((line) => {
+      const key = line.toLowerCase();
+      if (seen.has(key)) {
+        return false;
+      }
+      seen.add(key);
+      return true;
+    });
+
+  return cleanedLines.join("\n").slice(0, maxChars).trim();
 };

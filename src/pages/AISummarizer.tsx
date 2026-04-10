@@ -104,9 +104,10 @@ export default function AISummarizer() {
     try {
       const extractedText = await extractTextFromPdf(file);
       setText(extractedText);
-    } catch (error: any) {
+    } catch (error) {
       console.error(error);
-      alert(`Failed to read PDF: ${error.message || 'Please try another file.'}`);
+      const message = error instanceof Error ? error.message : 'Please try another file.';
+      alert(`Failed to read PDF: ${message}`);
     } finally {
       setLoading(false);
     }
@@ -121,7 +122,8 @@ export default function AISummarizer() {
       setResult(data);
     } catch (error) {
       console.error(error);
-      alert(`Failed to generate summary: ${error.message || 'Please try again.'}`);
+      const message = error instanceof Error ? error.message : 'Please try again.';
+      alert(`Failed to generate summary: ${message}`);
     } finally {
       setLoading(false);
     }

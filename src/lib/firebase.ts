@@ -1,6 +1,7 @@
 import { initializeApp } from "firebase/app";
 import { getAuth } from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
+import { getStorage } from "firebase/storage";
 
 const maskValue = (value: string | undefined, visibleStart = 6, visibleEnd = 4) => {
   if (!value) return "(missing)";
@@ -42,13 +43,16 @@ if (missingEnvVars.length > 0) {
 }
 
 const app = initializeApp(firebaseConfig);
+const storage = getStorage(app);
 
 console.log("[firebase] initialized", {
   projectId: app.options.projectId,
   authDomain: app.options.authDomain,
   apiKeyPreview: maskValue(app.options.apiKey),
+  storageBucket: app.options.storageBucket,
 });
 
 export const auth = getAuth(app);
 export const db = getFirestore(app);
+export const storageService = storage;
 export default app;

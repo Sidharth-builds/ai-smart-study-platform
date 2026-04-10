@@ -3,8 +3,10 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { io, Socket } from 'socket.io-client';
 import { Stage, Layer, Line } from 'react-konva';
 import { ArrowLeft, Download, Eraser, FileText, Image as ImageIcon, Layers, Link as LinkIcon, MessageSquare, Pencil, Send, Share2, Users, X } from 'lucide-react';
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { useAuth } from '../lib/AuthContext';
-import { getRoomMessages, getUserFlashcards, RoomMessage, saveRoomMessage } from '../lib/firebaseService';
+import { getRoomMessages, getUserFlashcards, RoomMessage, saveRoomMessage, saveSharedResource } from '../lib/firebaseService';
+import { storageService } from '../lib/firebase';
 
 type RoomUser = {
   id: string;
@@ -290,6 +292,17 @@ export default function RoomDetail() {
       reader.readAsDataURL(file);
     });
 
+  const uploadPdfFile = async (file: File): Promise<string> => {
+    if (!user) {
+      throw new Error('Must be signed in to upload PDFs');
+    }
+
+    const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+    const storageReference = ref(storageService, `pdfs/${user.uid}/${Date.now()}-${safeName}`);
+    await uploadBytes(storageReference, file, { contentType: file.type || 'application/pdf' });
+    return await getDownloadURL(storageReference);
+  };
+
   const persistAndEmitMessage = async (message: RoomMessage['message']) => {
     if (!socketRef.current || !roomId || !user) return;
 
@@ -323,35 +336,65 @@ export default function RoomDetail() {
 
   const handleSendResource = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!roomId || !user) return;
 
     try {
       if (resourceType === 'link') {
         const trimmedUrl = resourceUrl.trim();
         if (!trimmedUrl) return;
 
-        await persistAndEmitMessage({
+        const resourceMessage: RoomMessage['message'] = {
           type: 'link',
           content: trimmedUrl,
           name: resourceName.trim() || trimmedUrl,
+        };
+
+        await persistAndEmitMessage(resourceMessage);
+        await saveSharedResource({
+          roomId,
+          userId: user.uid,
+          userName: user.displayName || 'Anonymous',
+          type: 'link',
+          content: resourceMessage.content,
+          name: resourceMessage.name,
         });
       } else {
         if (!resourceFile) return;
 
         if (resourceType === 'pdf') {
-          // For PDFs, create a temporary link instead of base64
-          const fileUrl = URL.createObjectURL(resourceFile);
-          await persistAndEmitMessage({
-            type: 'link',
+          const fileUrl = await uploadPdfFile(resourceFile);
+          const resourceMessage: RoomMessage['message'] = {
+            type: 'pdf',
             content: fileUrl,
             name: resourceName.trim() || resourceFile.name,
+          };
+
+          await persistAndEmitMessage(resourceMessage);
+          await saveSharedResource({
+            roomId,
+            userId: user.uid,
+            userName: user.displayName || 'Anonymous',
+            type: 'pdf',
+            content: resourceMessage.content,
+            name: resourceMessage.name,
           });
         } else {
           // For images, keep the existing base64 approach
           const content = await convertFileToDataUrl(resourceFile);
-          await persistAndEmitMessage({
+          const resourceMessage: RoomMessage['message'] = {
             type: resourceType,
             content,
             name: resourceName.trim() || resourceFile.name,
+          };
+
+          await persistAndEmitMessage(resourceMessage);
+          await saveSharedResource({
+            roomId,
+            userId: user.uid,
+            userName: user.displayName || 'Anonymous',
+            type: 'image',
+            content: resourceMessage.content,
+            name: resourceMessage.name,
           });
         }
       }
@@ -649,13 +692,13 @@ export default function RoomDetail() {
                       <a href={resourceMessage.content} target="_blank" rel="noopener noreferrer" className="block">
                         <img src={resourceMessage.content} alt={resourceMessage.name || 'shared'} className="max-h-44 w-full rounded-xl object-cover" />
                       </a>
-                    ) : resourceMessage.type === 'link' && resourceMessage.content.startsWith('blob:') ? (
+                    ) : resourceMessage.type === 'pdf' ? (
                       <a href={resourceMessage.content} target="_blank" rel="noopener noreferrer" className="text-blue-400 underline break-all">
-                        📄 {resourceMessage.name || 'PDF'}
+                        PDF {resourceMessage.name || 'View PDF'}
                       </a>
                     ) : (
                       <a href={resourceMessage.content} target="_blank" rel="noopener noreferrer" className="text-blue-400 underline break-all">
-                        Link {resourceMessage.content}
+                        {resourceMessage.name || resourceMessage.content}
                       </a>
                     )}
                   </div>
@@ -713,3 +756,5 @@ export default function RoomDetail() {
     </div>
   );
 }
+
+

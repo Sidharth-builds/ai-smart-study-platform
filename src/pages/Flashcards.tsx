@@ -6,7 +6,7 @@ import { db } from '../lib/firebase';
 import { collection, addDoc, Timestamp, updateDoc, doc, query, where, getDocs, deleteDoc } from 'firebase/firestore';
 import { useAuth } from '../lib/AuthContext';
 import { jsPDF } from 'jspdf';
-import { extractMeaningfulTextFromHtml, extractTextFromPdfFile } from '../lib/documentProcessing';
+import { extractMeaningfulTextFromHtml, extractTextFromPdfFile, prepareFlashcardSourceText } from '../lib/documentProcessing';
 import { COLLECTIONS } from '../lib/firebaseService';
 
 interface Flashcard {
@@ -46,6 +46,11 @@ Tips:
 - Copy the main headings and paragraphs only
 - Remove ads, menus, and unrelated sections
 - Then click Generate Cards again`;
+
+  const isPdfFile = (file: File) => {
+    const lowerName = file.name.toLowerCase();
+    return file.type === 'application/pdf' || lowerName.endsWith('.pdf');
+  };
 
   useEffect(() => {
     if (user) {
@@ -145,13 +150,17 @@ Tips:
         return textInput;
       case 'file':
         if (!fileInput) throw new Error('No file selected');
-        if (fileInput.type === 'application/pdf') {
-          return extractTextFromPdfFile(fileInput);
+        if (isPdfFile(fileInput)) {
+          const extracted = await extractTextFromPdfFile(fileInput);
+          const cleaned = prepareFlashcardSourceText(extracted, { maxChars: 5000 });
+          if (!cleaned.trim()) {
+            throw new Error('Unable to extract any text from the PDF file.');
+          }
+          return cleaned;
         } else if (fileInput.type.startsWith('image/')) {
-          // For images, placeholder - would need OCR
-          return `Image file: ${fileInput.name} - OCR not implemented yet`;
+          throw new Error('Image OCR is not supported yet. Please upload a PDF or paste text.');
         } else {
-          return `Unsupported file: ${fileInput.name}`;
+          throw new Error('Unsupported file type. Please upload a PDF or paste text.');
         }
       case 'url':
         try {
@@ -198,11 +207,11 @@ Tips:
       const savedCardsWithIds = await saveGeneratedCards(cardsWithMastered);
 
       setCards(savedCardsWithIds);
+      setSavedFlashcards((prev) => [...savedCardsWithIds, ...prev]);
       setShowGenerator(false);
       setShowPractice(true);
       setCurrentIndex(0);
       setIsFlipped(false);
-      fetchFlashcards();
     } catch (error) {
       console.error("Error generating cards:", error);
       const errorMessage = error instanceof Error ? error.message : 'Please try again.';
@@ -614,7 +623,7 @@ Tips:
                       const files = e.dataTransfer.files;
                       if (files.length > 0) {
                         const file = files[0];
-                        if (file.type === 'application/pdf' || file.type === 'image/jpeg' || file.type === 'image/png') {
+                        if (isPdfFile(file) || file.type === 'image/jpeg' || file.type === 'image/png') {
                           setFileInput(file);
                         } else {
                           alert('Please upload a PDF, JPG, or PNG file.');

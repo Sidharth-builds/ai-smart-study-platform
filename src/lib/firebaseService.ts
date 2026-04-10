@@ -20,6 +20,7 @@ export const COLLECTIONS = {
   USERS: 'Users',
   NOTES: 'notes',
   FLASHCARDS: 'decks',
+  SHARED_RESOURCES: 'sharedResources',
   STUDY_ROOMS: 'StudyRooms',
   MESSAGES: 'Messages',
   PREVIOUS_PAPERS: 'PreviousPapers',
@@ -186,6 +187,17 @@ export interface StudySession {
   subject: string;
   duration: number; // in hours
   date: Timestamp;
+}
+
+export interface SharedResource {
+  id?: string;
+  roomId: string;
+  userId: string;
+  userName: string;
+  type: 'image' | 'pdf' | 'link';
+  content: string;
+  name?: string;
+  createdAt: Timestamp;
 }
 
 // Basic Service Functions
@@ -513,6 +525,16 @@ export const saveRoomMessage = async (message: Omit<RoomMessage, 'id' | 'time'>)
   const docRef = await addDoc(collection(db, COLLECTIONS.MESSAGES), {
     ...message,
     time: Timestamp.now(),
+  });
+  return docRef.id;
+};
+
+export const saveSharedResource = async (
+  resource: Omit<SharedResource, 'id' | 'createdAt'>,
+) => {
+  const docRef = await addDoc(collection(db, COLLECTIONS.SHARED_RESOURCES), {
+    ...resource,
+    createdAt: Timestamp.now(),
   });
   return docRef.id;
 };
