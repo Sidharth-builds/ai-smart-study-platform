@@ -28,7 +28,6 @@ export default function Profile() {
   const [userProfile, setUserProfile] = useState<UserProfile>({ name: '', studyStream: '' });
   const [loading, setLoading] = useState(true);
   const [userData, setUserData] = useState<any>({});
-  const [stream, setStream] = useState('');
 
   useEffect(() => {
     if (user) {
@@ -136,16 +135,7 @@ export default function Profile() {
     if (snap.exists()) {
       const data = snap.data();
       setUserData(data);
-      setStream(data.stream || '');
     }
-  };
-
-  const saveStream = async () => {
-    if (!user) return;
-    await setDoc(doc(db, "users", user.uid), {
-      stream: stream
-    }, { merge: true });
-    await fetchUser(); // Refresh data
   };
 
   const updateStreak = async () => {
@@ -195,16 +185,25 @@ export default function Profile() {
             <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{userData.stream || "Not set yet"}</p>
             <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">{user?.email || 'No email found'}</p>
             <div className="mt-4">
-              <input
-                type="text"
-                placeholder="Enter your study stream"
-                value={stream}
-                onChange={(e) => setStream(e.target.value)}
+              <select
+                value={userData.stream || ""}
+                onChange={async (e) => {
+                  const newStream = e.target.value;
+                  if (!user) return;
+                  await setDoc(doc(db, "users", user.uid), {
+                    stream: newStream
+                  }, { merge: true });
+                  setUserData({ ...userData, stream: newStream });
+                }}
                 className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
-              />
-              <button onClick={saveStream} className="mt-2 w-full rounded-lg bg-indigo-600 py-2 font-bold text-white transition-all hover:bg-indigo-500">
-                Save
-              </button>
+              >
+                <option value="">Select your study stream</option>
+                <option value="CSE">CSE</option>
+                <option value="AIML">AIML</option>
+                <option value="ECE">ECE</option>
+                <option value="IT">IT</option>
+                <option value="Other">Other</option>
+              </select>
             </div>
             <button className="mt-6 w-full rounded-xl bg-indigo-600 py-3 font-bold text-white transition-all hover:bg-indigo-500">
               Manage Account
