@@ -24,37 +24,18 @@ type SavedFlashcard = {
   answer: string;
 };
 
-const socketServerUrl = import.meta.env.VITE_SOCKET_SERVER_URL;
+const socketServerUrl = import.meta.env.VITE_SOCKET_SERVER_URL || 'http://localhost:3000';
 
 const normalizeRoomUsers = (payload: unknown): RoomUser[] => {
-  const candidateUsers = Array.isArray(payload)
-    ? payload
-    : Array.isArray((payload as { users?: unknown[] } | null)?.users)
-      ? (payload as { users: unknown[] }).users
-      : [];
-
-  return candidateUsers
-    .map((candidate) => {
-      if (!candidate || typeof candidate !== 'object') {
-        return null;
-      }
-
-      const roomUser = candidate as {
-        id?: string;
-        userId?: string;
-        socketId?: string;
-        name?: string;
-        userName?: string;
-        username?: string;
-      };
-
-      const socketId = roomUser.socketId || roomUser.id || roomUser.userId;
-      const id = roomUser.id || roomUser.userId || socketId;
-      const name = roomUser.name || roomUser.userName || roomUser.username || 'Anonymous';
-
-      return id && socketId ? { id, name, socketId } : null;
-    })
-    .filter((roomUser): roomUser is RoomUser => roomUser !== null);
+  if (Array.isArray(payload)) {
+    return payload.filter((user): user is RoomUser => {
+      return typeof user === 'object' && user !== null &&
+             typeof user.id === 'string' &&
+             typeof user.name === 'string' &&
+             typeof user.socketId === 'string';
+    });
+  }
+  return [];
 };
 
 const isStandardMessage = (message: RoomMessage['message']): message is StandardMessage =>
@@ -197,7 +178,10 @@ export default function RoomDetail() {
     });
 
     socket.on('room-users', (roomUsers: unknown) => {
-      setUsers(normalizeRoomUsers(roomUsers));
+      console.log('Received room-users:', roomUsers);
+      const normalized = normalizeRoomUsers(roomUsers);
+      console.log('Normalized users:', normalized);
+      setUsers(normalized);
     });
 
     socket.on('whiteboard-update', (newLines: any[]) => {
@@ -276,6 +260,66 @@ export default function RoomDetail() {
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
+
+  // Handle paste events for PDFs
+  useEffect(() => {
+    const handlePaste = async (e: ClipboardEvent) => {
+      if (!e.clipboardData) return;
+
+      const items = e.clipboardData.items;
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        if (item.type === 'application/pdf' || item.type.startsWith('application/pdf')) {
+          e.preventDefault();
+          const file = item.getAsFile();
+          if (file) {
+            setResourceType('pdf');
+            setResourceFile(file);
+            setResourceName(file.name);
+            setResourceUrl(''); // Clear any link
+            console.log('PDF pasted from clipboard:', file.name);
+          }
+          break;
+        }
+      }
+    };
+
+    document.addEventListener('paste', handlePaste);
+    return () => document.removeEventListener('paste', handlePaste);
+  }, []);
+
+  const [isDragOver, setIsDragOver] = useState(false);
+
+  // Handle drag and drop for PDFs
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragOver(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragOver(false);
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragOver(false);
+
+    const files = e.dataTransfer.files;
+    if (files.length > 0) {
+      const file = files[0];
+      if (file.type === 'application/pdf') {
+        setResourceType('pdf');
+        setResourceFile(file);
+        setResourceName(file.name);
+        setResourceUrl(''); // Clear any link
+        console.log('PDF dropped:', file.name);
+      }
+    }
+  };
 
   const convertFileToDataUrl = (file: File) =>
     new Promise<string>((resolve, reject) => {
@@ -492,7 +536,16 @@ export default function RoomDetail() {
   const sharedResources = messages.filter(isResourceMessage);
 
   return (
-    <div className="h-[calc(100vh-120px)] flex flex-col gap-6">
+    <div className={`h-[calc(100vh-120px)] flex flex-col gap-6 transition-colors relative ${isDragOver ? 'bg-indigo-500/5' : ''}`} onDragOver={handleDragOver} onDragLeave={handleDragLeave} onDrop={handleDrop}>
+      {isDragOver && (
+        <div className="absolute inset-0 z-50 flex items-center justify-center bg-indigo-500/10 border-2 border-dashed border-indigo-500/50 rounded-3xl backdrop-blur-sm">
+          <div className="text-center">
+            <FileText className="w-16 h-16 text-indigo-400 mx-auto mb-4" />
+            <p className="text-xl font-bold text-indigo-400">Drop PDF here</p>
+            <p className="text-sm text-indigo-300">Release to share with the room</p>
+          </div>
+        </div>
+      )}
       <header className="flex justify-between items-center">
         <div className="flex items-center gap-4">
           <button onClick={() => navigate('/rooms')} className="p-2 hover:bg-slate-800 rounded-lg text-slate-400 transition-colors">
@@ -629,7 +682,10 @@ export default function RoomDetail() {
                     {roomUser.name?.[0] || 'U'}
                   </div>
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm text-white font-medium truncate">{roomUser.id === user?.uid ? 'You' : roomUser.name}</p>
+                    <p className="text-sm text-white font-medium truncate flex items-center gap-2">
+                      {roomUser.name}
+                      {roomUser.id === user?.uid && <span className="text-xs text-indigo-400 font-bold">(You)</span>}
+                    </p>
                     <p className="text-[10px] text-emerald-500 font-bold uppercase">Online</p>
                   </div>
                 </div>
@@ -652,6 +708,7 @@ export default function RoomDetail() {
               <Share2 className="w-5 h-5 text-emerald-500" />
               Shared Resources
             </h3>
+            <p className="text-xs text-slate-500 mb-4">Paste PDFs from clipboard or drag & drop them here</p>
             <div className="space-y-4">
               <div className="flex gap-2">
                 {(['link', 'image', 'pdf'] as const).map((type) => (
@@ -705,7 +762,7 @@ export default function RoomDetail() {
                 )}) : (
                   <div className="p-4 bg-slate-900/50 border border-slate-800 border-dashed rounded-2xl text-center">
                     <FileText className="w-8 h-8 text-slate-700 mx-auto mb-2" />
-                    <p className="text-xs text-slate-500">No shared resources yet. Upload an image or PDF, or add a link to share it with the room.</p>
+                    <p className="text-xs text-slate-500">No shared resources yet. Upload an image or PDF, paste from clipboard, drag & drop, or add a link to share it with the room.</p>
                   </div>
                 )}
               </div>
